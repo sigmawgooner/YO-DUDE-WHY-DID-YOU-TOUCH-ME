@@ -140,6 +140,7 @@ try{
 }catch{}
 updateDisplay();
 checkLock();
+initializeReels();
 
 // === AUDIO ===
 let audioCtx;
@@ -176,6 +177,19 @@ function checkLock(){
   }
 }
 
+// === INITIALIZE REELS ===
+function initializeReels(){
+  reels.forEach(reel=>{
+    reel.innerHTML='';
+    for(let i=0;i<3;i++){
+      const sym=document.createElement('div');
+      sym.className='symbol';
+      sym.innerText=symbols[Math.floor(Math.random()*symbols.length)];
+      reel.appendChild(sym);
+    }
+  });
+}
+
 // === REEL SPINNING ===
 function spinReel(reel){
   return new Promise(resolve=>{
@@ -185,7 +199,13 @@ function spinReel(reel){
     const stepTime=80+Math.random()*40;
     let count=0;
     const interval=setInterval(()=>{
-      reel.innerHTML=`<div class="symbol">${symbols[pos]}</div>`;
+      reel.innerHTML='';
+      for(let i=0;i<3;i++){
+        const sym=document.createElement('div');
+        sym.className='symbol';
+        sym.innerText=symbols[(pos+i)%totalSymbols];
+        reel.appendChild(sym);
+      }
       pos=(pos+1)%totalSymbols;
       playSound(400+(pos*40),0.05);
       count++;
