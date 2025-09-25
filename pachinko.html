@@ -15,7 +15,7 @@
 </head>
 <body>
 <div id="container">
-  <div style="color:#ffd66b; font-weight:800; margin-bottom:8px;">Total Points</div>
+  <div style="color:#ffd66b; font-weight:800; margin-bottom:8px;">Total Points (Max 200)</div>
   <div id="total" style="font-size:28px; margin-bottom:12px;">0</div>
   <canvas id="pachinko" width="640" height="840"></canvas>
   <div style="margin-top:12px;">
@@ -30,7 +30,8 @@ const canvas = document.getElementById('pachinko');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height;
 const rows = 12, slotCount = rows + 1;
-const STORAGE_KEY = 'pachinko.canvas.session.v6';
+const STORAGE_KEY = 'pachinko.canvas.session.v7';
+const POINT_CAP = 200;
 
 let displayTotal = 0, history = [], ball = null, dropping = false;
 
@@ -40,14 +41,13 @@ try {
   displayTotal = stored?.total || 0; 
   history = stored?.history || [];
 } catch{}
-
 document.getElementById('total').innerText = displayTotal;
 if(history.length) document.getElementById('last').innerText = `Last: ${history[0].points}pts (slot ${history[0].slot})`;
 
 // Initialize base scores
 const baseScores = Array.from({ length: slotCount }, (_, i) => Math.max(1, 50 - Math.abs(i - (slotCount-1)/2)*8));
 
-// Pegs: staggered grid
+// Pegs
 const pegs = [];
 const margin = 24, topY=60, bottomY=height-140;
 const pegCols = 10, pegRows = rows;
@@ -112,23 +112,25 @@ function simulatePhysics(dt){
   }
 }
 
-// Reveal score and save
+// Reveal score with cap
 function revealScore(idx){
-  const pts=baseScores[idx]||0;
-  const start=displayTotal, end=start+pts;
-  const dur=900, t0=performance.now();
+  const pts = baseScores[idx]||0;
+  const start = displayTotal;
+  const end = Math.min(POINT_CAP, start + pts);
+  const dur = 900, t0 = performance.now();
   function tick(now){
-    const p=Math.min(1,(now-t0)/dur);
-    displayTotal=Math.floor(start+(end-start)*(1-Math.pow(1-p,2)));
-    document.getElementById('total').innerText=displayTotal;
+    const p = Math.min(1,(now-t0)/dur);
+    displayTotal = Math.floor(start + (end-start)*(1-Math.pow(1-p,2)));
+    document.getElementById('total').innerText = displayTotal;
     if(p<1) requestAnimationFrame(tick);
     else {
-      history.unshift({slot:idx,points:pts,ts:new Date().toISOString()});
+      history.unshift({slot:idx, points:pts, ts:new Date().toISOString()});
       history=history.slice(0,200);
-      document.getElementById('last').innerText=`Last: ${pts}pts (slot ${idx})`;
+      document.getElementById('last').innerText = `Last: ${pts}pts (slot ${idx})`;
       localStorage.setItem(STORAGE_KEY, JSON.stringify({total:displayTotal,history}));
       drawStatic();
       drawBall();
+      if(displayTotal >= POINT_CAP) document.getElementById('drop').disabled = true;
     }
   }
   requestAnimationFrame(tick);
@@ -143,7 +145,7 @@ function render(){
 
 // Start drop
 document.getElementById('drop').addEventListener('click', ()=>{
-  if(dropping) return;
+  if(dropping || displayTotal >= POINT_CAP) return;
   ball={x:width/2, y:28, vx:(Math.random()-0.5)*6, vy:0, r:10, restingSlot:null};
   dropping=true;
   ensureAudio();
@@ -163,6 +165,7 @@ document.getElementById('reset').addEventListener('click', ()=>{
   localStorage.removeItem(STORAGE_KEY);
   document.getElementById('total').innerText=displayTotal;
   document.getElementById('last').innerText='Last: —';
+  document.getElementById('drop').disabled = false;
   drawStatic();
 });
 
