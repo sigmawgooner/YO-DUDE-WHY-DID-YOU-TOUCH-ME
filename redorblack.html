@@ -10,6 +10,8 @@
   #controls { margin-top:8px; display:flex; gap:8px; align-items:center; }
   input { width:60px; padding:4px; border-radius:6px; text-align:center; font-weight:800; }
   button { padding:6px 14px; border-radius:8px; cursor:pointer; font-weight:800; }
+  #redBtn { background:#ff4d4d; color:#fff; }
+  #blackBtn { background:#222; color:#fff; }
   #spin { background:#0f766e; color:#fff; }
   #reset { background:#2b2b2b; color:#fff; }
   #info { margin-top:10px; font-size:14px; color:#ffd66b; }
@@ -18,32 +20,46 @@
 </head>
 <body>
 
-<div id="info">Chips: <span id="chips">50</span> | Max 200 | Bet Amount: <input type="number" id="bet" value="5" min="1" max="50"> </div>
-<canvas id="wheel" width="500" height="500"></canvas>
+<div id="info">
+  Chips: <span id="chips">50</span> | Max 200 | Bet Amount: <input type="number" id="bet" value="5" min="1" max="50"> 
+</div>
 <div id="controls">
-  <button id="spin">SPIN</button>
+  <button id="redBtn">RED</button>
+  <button id="blackBtn">BLACK</button>
+  <button id="spin" disabled>SPIN</button>
   <button id="reset">RESET</button>
 </div>
+<div id="timer" style="margin-top:6px; font-size:14px; color:#ffd66b;"></div>
+<canvas id="wheel" width="500" height="500"></canvas>
 <div id="history">History:</div>
 
 <script>
 const canvas = document.getElementById('wheel');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height, radius = width/2 - 20;
-const slots = 18*2; // 18 red, 18 black
-let angleOffset = 0;
-let ballAngle = 0, spinning = false;
-const STORAGE_KEY='redblack.roulette.v1';
-let chips = 50;
-let history = [];
+const slots = 36; // 18 red, 18 black
+let angleOffset = 0, ballAngle = 0, spinning = false;
+const STORAGE_KEY='redblack.roulette.v2';
+let chips = 50, history = [], guessColor = null;
+let lockedUntil = null;
 
 // Load storage
 try{
   const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
   chips = stored?.chips || 50;
   history = stored?.history || [];
+  lockedUntil = stored?.lockedUntil || null;
 } catch{}
-document.getElementById('chips').innerText=chips;
+document.getElementById('chips').innerText = chips;
+
+// Update history
+function updateHistory(){
+  const hEl=document.getElementById('history');
+  hEl.innerHTML='History:<br>';
+  history.slice(0,10).forEach(h=>{
+    hEl.innerHTML+=`[${h.color}] Bet:${h.bet} → ${h.win?'+':''}${h.result}<br>`;
+  });
+}
 
 // Draw wheel
 function drawWheel(){
@@ -55,7 +71,7 @@ function drawWheel(){
     ctx.beginPath();
     ctx.moveTo(center.x,center.y);
     ctx.arc(center.x,center.y,radius,start,end);
-    ctx.fillStyle = i%2===0?'#ff4d4d':'#222'; // red/black
+    ctx.fillStyle = i%2===0?'#ff4d4d':'#222';
     ctx.fill();
     ctx.strokeStyle='#111'; ctx.stroke();
   }
@@ -71,23 +87,37 @@ function drawWheel(){
   ctx.beginPath(); ctx.arc(center.x,center.y,20,0,Math.PI*2); ctx.fillStyle='#071021'; ctx.fill();
 }
 
-// Update history display
-function updateHistory(){
-  const hEl=document.getElementById('history');
-  hEl.innerHTML='History:<br>';
-  history.slice(0,10).forEach(h=>{ hEl.innerHTML+=`[${h.color}] Bet:${h.bet} → ${h.win?'+':''}${h.result}<br>`;});
+// Timer logic
+function updateTimer(){
+  if(!lockedUntil){ document.getElementById('timer').innerText=''; return; }
+  const remaining = lockedUntil - Date.now();
+  if(remaining<=0){ lockedUntil=null; document.getElementById('spin').disabled = !guessColor; document.getElementById('timer').innerText=''; localStorage.setItem(STORAGE_KEY,JSON.stringify({chips,history,lockedUntil:null})); return; }
+  const hrs=Math.floor(remaining/3600000);
+  const mins=Math.floor((remaining%3600000)/60000);
+  const secs=Math.floor((remaining%60000)/1000);
+  document.getElementById('timer').innerText = `Next unlock: ${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
 }
+setInterval(updateTimer,1000);
 
-// Spin logic
+// Color buttons
+document.getElementById('redBtn').addEventListener('click',()=>{ guessColor='red'; document.getElementById('spin').disabled = !lockedUntil; });
+document.getElementById('blackBtn').addEventListener('click',()=>{ guessColor='black'; document.getElementById('spin').disabled = !lockedUntil; });
+
+// Spin
 document.getElementById('spin').addEventListener('click', ()=>{
-  if(spinning) return;
+  if(spinning || !guessColor || lockedUntil) return;
   let betAmt = parseInt(document.getElementById('bet').value)||0;
-  if(betAmt>chips) betAmt=chips;
+  if(betAmt>chips) betAmt = chips;
   if(betAmt<=0) return;
-  const guess = Math.random()<0.5?'red':'black';
-  chips-=betAmt; document.getElementById('chips').innerText=chips;
 
-  let spinDur = 2000 + Math.random()*1000;
+  // Harder to win
+  const winChance = Math.random() < 0.45; // slightly less than 50%
+  const ballColor = winChance ? guessColor : (guessColor==='red'?'black':'red');
+  
+  chips -= betAmt;
+  document.getElementById('chips').innerText = chips;
+
+  const spinDur = 2500 + Math.random()*1000;
   const start = performance.now();
   const startOffset = angleOffset;
   const ballStart = Math.random()*2*Math.PI;
@@ -96,27 +126,31 @@ document.getElementById('spin').addEventListener('click', ()=>{
   function animate(now){
     const t=(now-start)/spinDur;
     const ease = 1 - Math.pow(1-t,3);
-    angleOffset = startOffset + ease*10; // multiple spins
-    ballAngle = ballStart + ease*15*(Math.random()*0.2+0.9); // ball rotates differently
+    angleOffset = startOffset + ease*10;
+    ballAngle = ballStart + ease*15*(Math.random()*0.2+0.9);
     drawWheel();
     if(t<1) requestAnimationFrame(animate);
     else finish();
   }
 
   function finish(){
-    // determine landing slot
-    const finalAngle = (ballAngle+angleOffset)%(2*Math.PI);
-    const slotIndex = Math.floor(finalAngle/(2*Math.PI/slots));
-    const color = slotIndex%2===0?'red':'black';
-    const win = (color===guess);
+    const color = ballColor;
+    const win = (color===guessColor);
     const result = win?betAmt*2:0;
     if(win) chips += result;
-    if(chips>=200) { chips=200; document.getElementById('spin').disabled=true; }
-    if(chips<=0) { chips=0; document.getElementById('spin').disabled=true; }
-    document.getElementById('chips').innerText=chips;
+
+    // Check limits
+    if(chips>=200 || chips<=0){
+      if(chips>=200) chips=200;
+      if(chips<=0) chips=0;
+      lockedUntil = Date.now()+24*60*60*1000; // lock for 24h
+      document.getElementById('spin').disabled=true;
+    }
+
+    document.getElementById('chips').innerText = chips;
     history.unshift({color,bet:betAmt,win,result}); history=history.slice(0,200);
     updateHistory();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({chips,history}));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({chips,history,lockedUntil}));
     spinning=false;
   }
 
@@ -125,9 +159,9 @@ document.getElementById('spin').addEventListener('click', ()=>{
 
 // Reset
 document.getElementById('reset').addEventListener('click',()=>{
-  chips=50; history=[]; spinning=false;
+  chips=50; history=[]; guessColor=null; spinning=false; lockedUntil=null;
   document.getElementById('chips').innerText=chips;
-  document.getElementById('spin').disabled=false;
+  document.getElementById('spin').disabled=true;
   localStorage.removeItem(STORAGE_KEY);
   updateHistory();
 });
@@ -135,6 +169,7 @@ document.getElementById('reset').addEventListener('click',()=>{
 // Initial draw
 drawWheel();
 updateHistory();
+if(lockedUntil) document.getElementById('spin').disabled=true;
 </script>
 
 </body>
