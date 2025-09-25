@@ -1,0 +1,56 @@
+import React, { useEffect, useRef, useState } from "react";
+
+const STORAGE_KEY = "pachinko.canvas.session.v5";
+
+export default function PachinkoCanvas() {
+  const canvasRef = useRef(null), rafRef = useRef(null), audioCtxRef = useRef(null);
+  const [width] = useState(640), [height] = useState(840);
+  const rows = 12, slotCount = rows + 1;
+  const baseScores = useRef(Array.from({ length: slotCount }, (_, i) => Math.max(1, 50 - Math.abs(i - (slotCount - 1)/2)*8)));
+
+  const [displayTotal, setDisplayTotal] = useState(() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY))?.total || 0 } catch { return 0 } });
+  const [history, setHistory] = useState(() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY))?.history || [] } catch { return [] } });
+
+  const pegsRef = useRef([]), ballRef = useRef(null), stateRef = useRef({ dropping: false });
+
+  // Generate a staggered grid for fair random distribution
+  useEffect(() => {
+    const pegs = [], margin = 24, topY = 60, bottomY = height - 140, usableW = width - margin*2;
+    const pegRows = rows;
+    const pegCols = 10; // fixed number per row for fairness
+    const rowSpacing = (bottomY - topY) / pegRows;
+    const colSpacing = usableW / pegCols;
+
+    for (let r = 0; r < pegRows; r++) {
+      for (let c = 0; c < pegCols; c++) {
+        let offset = (r % 2) * (colSpacing / 2); // stagger every other row
+        let x = margin + c * colSpacing + offset + colSpacing/2;
+        let y = topY + r * rowSpacing;
+        pegs.push({x, y, r: 7});
+      }
+    }
+    pegsRef.current = pegs;
+    drawStatic();
+  }, []);
+
+  const ensureAudio = () => { if(!audioCtxRef.current) try{audioCtxRef.current=new(window.AudioContext||window.webkitAudioContext)()}catch{}; return audioCtxRef.current };
+  const plink=(f=900,d=0.04)=>{const ctx=ensureAudio();if(!ctx)return;const o=ctx.createOscillator(),g=ctx.createGain();o.type="sine";o.frequency.value=f*(0.9+Math.random()*0.2);g.gain.value=0.06;o.connect(g);g.connect(ctx.destination);o.start();g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d);o.stop(ctx.currentTime+d+0.01)};
+  const plonk=(f=220,d=0.18)=>{const ctx=ensureAudio();if(!ctx)return;const o=ctx.createOscillator(),g=ctx.createGain();o.type="triangle";o.frequency.value=f*(0.95+Math.random()*0.08);g.gain.value=0.12;o.connect(g);g.connect(ctx.destination);o.start();g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d);o.stop(ctx.currentTime+d+0.01)};
+
+  function drawStatic(){const c=canvasRef.current;if(!c)return;const ctx=c.getContext("2d");ctx.fillStyle="#071021";ctx.fillRect(0,0,width,height); for(const p of pegsRef.current){ctx.beginPath();ctx.fillStyle="#DDD";ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill()} const slotTop=height-120,slotH=96,slotW=width/slotCount; ctx.fillStyle="#111";ctx.fillRect(0,slotTop,width,slotH); ctx.strokeStyle="#2b2b2b"; for(let i=0;i<slotCount;i++){ctx.strokeRect(i*slotW+6,slotTop+6,slotW-12,slotH-12); ctx.fillStyle="#cfcfcf";ctx.font="bold 14px monospace";ctx.textAlign="center";ctx.fillText(`${i}`,i*slotW+slotW/2,slotTop+28);ctx.fillStyle="#ffd66b";ctx.font="bold 18px monospace";ctx.fillText(`${baseScores.current[i]}`,i*slotW+slotW/2,slotTop+58)}}
+
+  const drawBallInSlot=slotIndex=>{const c=canvasRef.current;if(!c)return;const ctx=c.getContext("2d"),slotW=width/slotCount,cx=slotIndex*slotW+slotW/2,cy=height-60;ctx.beginPath();ctx.fillStyle="#ffb347";ctx.arc(cx,cy,12,0,Math.PI*2);ctx.fill()};
+
+  const startDrop=()=>{if(stateRef.current.dropping)return;ballRef.current={x:width/2,y:28,vx:(Math.random()-0.5)*6,vy:0,r:10,restingSlot:null};stateRef.current.dropping=true;ensureAudio();const last={t:performance.now()};const step=now=>{const dt=Math.min(32,now-last.t)/1000;last.t=now;simulatePhysics(dt);renderFrame();if(stateRef.current.dropping)rafRef.current=requestAnimationFrame(step)};rafRef.current=requestAnimationFrame(step)};
+
+  function simulatePhysics(dt){const b=ballRef.current;if(!b)return;const g=900;b.vy+=g*dt;b.vx*=Math.pow(0.999,dt*60);b.vy*=Math.pow(0.999,dt*60);b.x+=b.vx*dt;b.y+=b.vy*dt;const lb=8,rb=width-8;if(b.x-b.r<lb){b.x=lb+b.r;b.vx=Math.abs(b.vx)*0.6;b.vy*=0.9}if(b.x+b.r>rb){b.x=rb-b.r;b.vx=-Math.abs(b.vx)*0.6;b.vy*=0.9} for(const p of pegsRef.current){const dx=b.x-p.x,dy=b.y-p.y,dist=Math.sqrt(dx*dx+dy*dy),minD=b.r+p.r;if(dist<minD && dist>0){const nx=dx/dist,ny=dy/dist,rel=b.vx*nx+b.vy*ny;b.vx-=(1.8*rel)*nx;b.vy-=(1.8*rel)*ny;b.vx+=(Math.random()-0.5)*20;const overlap=minD-dist+0.5;b.x+=nx*overlap;b.y+=ny*overlap;plink(800-(p.y/height)*300,0.03)}}const st=height-120;if(b.y+b.r>=st){const idx=Math.min(slotCount-1,Math.max(0,Math.floor(b.x/(width/slotCount))));b.x=idx*(width/slotCount)+(width/slotCount)/2;b.y=height-60;b.vx=0;b.vy=0;b.restingSlot=idx;stateRef.current.dropping=false;plonk(200+Math.random()*60,0.24);setTimeout(()=>revealScore(idx),750)}}
+
+  const revealScore=idx=>{const pts=baseScores.current[idx]||0,start=displayTotal,end=start+pts,dur=900,t0=performance.now();const tick=now=>{const p=Math.min(1,(now-t0)/dur);setDisplayTotal(Math.floor(start+(end-start)*(1-Math.pow(1-p,2))));if(p<1)requestAnimationFrame(tick);else{const record={slot:idx,points:pts,ts:new Date().toISOString()};setHistory(h=>[record,...h].slice(0,200));const raw=localStorage.getItem(STORAGE_KEY),parsed=raw?JSON.parse(raw):{total:0,history:[]};parsed.total=end;parsed.history=[record,...(parsed.history||[])].slice(0,200);localStorage.setItem(STORAGE_KEY,JSON.stringify(parsed))}};requestAnimationFrame(tick)};
+
+  function renderFrame(){const c=canvasRef.current;if(!c)return;const ctx=c.getContext("2d");ctx.fillStyle="#071021";ctx.fillRect(0,0,width,height);for(const p of pegsRef.current){ctx.beginPath();ctx.fillStyle="#e6e6e6";ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill()}const slotTop=height-120,slotH=96,slotW=width/slotCount;ctx.fillStyle="#0b0b0d";ctx.fillRect(0,slotTop,width,slotH);ctx.strokeStyle="#222";for(let i=0;i<slotCount;i++){ctx.strokeRect(i*slotW+6,slotTop+6,slotW-12,slotH-12);ctx.fillStyle="#9aa6b2";ctx.font="bold 14px monospace";ctx.textAlign="center";ctx.fillText(`${i}`,i*slotW+slotW/2,slotTop+28);ctx.fillStyle="#c7a15b";ctx.font="bold 18px monospace";ctx.fillText(`${baseScores.current[i]}`,i*slotW+slotW/2,slotTop+58)}if(ballRef.current && ballRef.current.restingSlot!=null)drawBallInSlot(ballRef.current.restingSlot);if(ballRef.current && stateRef.current.dropping){ctx.beginPath();ctx.fillStyle="#ffb347";ctx.arc(ballRef.current.x,ballRef.current.y,ballRef.current.r,0,Math.PI*2);ctx.fill()}}
+
+  const clearSession=()=>{setHistory([]);setDisplayTotal(0);localStorage.removeItem(STORAGE_KEY);if(ballRef.current)ballRef.current.restingSlot=null;drawStatic()};
+
+  useEffect(()=>{drawStatic();const raw=localStorage.getItem(STORAGE_KEY);if(raw){try{const parsed=JSON.parse(raw);if(parsed.history?.length){ballRef.current={restingSlot:parsed.history[0].slot};drawStatic();drawBallInSlot(parsed.history[0].slot)}}catch{}}},[]);
+
+  return <div style={{background:'#000'}} className="min-h-screen flex items-center justify-center p-6"><div><div style={{color:'#ffd66b',fontWeight:800,marginBottom:8}}>Total Points</div><div style={{fontSize:28,color:'#fff',marginBottom:12}}>{displayTotal}</div><canvas ref={canvasRef} width={width} height={height} style={{display:'block',borderRadius:10,boxShadow:'0 8px 30px rgba(0,0,0,0.6)'}} /><div style={{display:'flex',gap:8,marginTop:12,justifyContent:'center'}}><button onClick={startDrop} disabled={stateRef.current.dropping} style={{padding:'8px 14px',borderRadius:8,fontWeight:800,background:'#0f766e',color:'#fff'}}>DROP</button><button onClick={clearSession} style={{padding:'8px 14px',borderRadius:8,fontWeight:700,bgcolor:'#2b2b2b',color:'#fff'}}>RESET POINTS</button></div><div style={{color:'#9aa6b2',marginTop:10,fontSize:13}}>Last: {history.length?`${history[0].points}pts (slot ${history[0].slot})`:'—'}</div></div></div>;}
