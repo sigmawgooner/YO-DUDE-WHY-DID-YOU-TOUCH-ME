@@ -5,185 +5,175 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Red or Black Roulette</title>
 <style>
-body { margin:0; background:#071021; display:flex; flex-direction:column; align-items:center; font-family:monospace; color:#fff; height:100vh; justify-content:center;}
-canvas { background:#071021; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.7); display:block; margin:20px 0;}
-#controls { margin-top:8px; display:flex; gap:8px; align-items:center; }
-input { width:60px; padding:4px; border-radius:6px; text-align:center; font-weight:800; }
-button { padding:6px 14px; border-radius:8px; cursor:pointer; font-weight:800; border:none; }
-#redBtn { background:#ff4d4d; color:#fff; }
-#blackBtn { background:#222; color:#fff; }
-.selected { box-shadow:0 0 0 3px #ffd66b inset; }
-#spin { background:#0f766e; color:#fff; }
-#reset { background:#2b2b2b; color:#fff; }
-#info { margin-top:10px; font-size:14px; color:#ffd66b; }
-#history { margin-top:6px; font-size:12px; color:#9aa6b2; max-height:120px; overflow-y:auto; text-align:left; width:300px; }
-#timer { margin-top:6px; font-size:14px; color:#ffd66b; }
+  body { margin:0; background:#071021; display:flex; flex-direction:column; align-items:center; font-family:monospace; color:#fff; height:100vh; justify-content:center;}
+  canvas { background:#071021; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.7); display:block; margin:20px 0;}
+  #controls { margin-top:8px; display:flex; gap:8px; align-items:center; }
+  button { padding:6px 14px; border-radius:8px; cursor:pointer; font-weight:800; }
+  #redBtn { background:#ff4d4d; color:#fff; }
+  #blackBtn { background:#222; color:#fff; }
+  #spin { background:#0f766e; color:#fff; }
+  #reset { background:#2b2b2b; color:#fff; }
+  #info { margin-top:10px; font-size:14px; color:#ffd66b; }
+  #history { margin-top:6px; font-size:12px; color:#9aa6b2; max-height:120px; overflow-y:auto; text-align:left; width:300px; }
 </style>
 </head>
 <body>
 
 <div id="info">
-Chips: <span id="chips">50</span> | Max 200 | Bet: <input type="number" id="bet" value="5" min="1" max="50">
+  Chips: <span id="chips">50</span> | Max 200
 </div>
-
 <div id="controls">
-  <button id="redBtn">RED</button>
-  <button id="blackBtn">BLACK</button>
+  <button id="redBtn">Red</button>
+  <button id="blackBtn">Black</button>
   <button id="spin" disabled>SPIN</button>
   <button id="reset">RESET</button>
 </div>
-
-<div id="timer"></div>
 <canvas id="wheel" width="500" height="500"></canvas>
 <div id="history">History:</div>
 
 <script>
 const canvas = document.getElementById('wheel');
 const ctx = canvas.getContext('2d');
-const width = canvas.width, height = canvas.height, radius = width/2 - 20;
-const slots = 36; // total segments
-let ballAngle = 0, spinning=false;
-const STORAGE_KEY='redblack.roulette.v4';
-let chips = 50, history = [], guessColor = null, lockedUntil = null;
+const width = canvas.width, height = canvas.height;
+const radius = width/2 - 20;
+const slots = 36; // 18 red, 18 black alternating
+let ballAngle = 0, spinning = false;
+let selectedColor = null;
+const STORAGE_KEY='redblack.roulette.v2';
+let chips = 50, history = [];
+let unlockTime = 0;
 
 // Load storage
-try{
+try {
   const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
   chips = stored?.chips || 50;
   history = stored?.history || [];
-  lockedUntil = stored?.lockedUntil || null;
+  unlockTime = stored?.unlockTime || 0;
 } catch{}
 document.getElementById('chips').innerText = chips;
 
-function updateHistory(){
-  const hEl=document.getElementById('history');
-  hEl.innerHTML='History:<br>';
-  history.slice(0,10).forEach(h=>{
-    hEl.innerHTML+=`[${h.color}] Bet:${h.bet} → ${h.win?'+':''}${h.result}<br>`;
-  });
-}
+// Buttons
+const redBtn = document.getElementById('redBtn');
+const blackBtn = document.getElementById('blackBtn');
+const spinBtn = document.getElementById('spin');
 
-// Wheel is static, alternating red/black
+function selectColor(color){
+    if(spinning) return;
+    selectedColor=color;
+    redBtn.style.outline = color==='red'?'3px solid #ffd66b':'none';
+    blackBtn.style.outline = color==='black'?'3px solid #ffd66b':'none';
+    spinBtn.disabled=false;
+}
+redBtn.addEventListener('click', ()=>selectColor('red'));
+blackBtn.addEventListener('click', ()=>selectColor('black'));
+
+// Draw wheel in table perspective
 function drawWheel(){
-  ctx.clearRect(0,0,width,height);
-  const center={x:width/2,y:height/2};
-  for(let i=0;i<slots;i++){
-    const start = i*(2*Math.PI/slots);
-    const end = (i+1)*(2*Math.PI/slots);
-    ctx.beginPath();
-    ctx.moveTo(center.x,center.y);
-    ctx.arc(center.x,center.y,radius,start,end);
-    ctx.fillStyle=i%2===0?'#ff4d4d':'#222';
-    ctx.fill();
-    ctx.strokeStyle='#111'; ctx.stroke();
-  }
-  // Ball
-  const ballR=12;
-  const ballX=center.x+Math.cos(ballAngle)*(radius-30);
-  const ballY=center.y+Math.sin(ballAngle)*(radius-30);
-  const grad=ctx.createRadialGradient(ballX,ballY,2,ballX,ballY,ballR);
-  grad.addColorStop(0,'#fff2b2'); grad.addColorStop(0.5,'#ffd66b'); grad.addColorStop(1,'#ff8c00');
-  ctx.fillStyle=grad;
-  ctx.beginPath(); ctx.arc(ballX,ballY,ballR,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(center.x,center.y,20,0,Math.PI*2); ctx.fillStyle='#071021'; ctx.fill();
+    ctx.clearRect(0,0,width,height);
+    const center = {x:width/2, y:height/2 + 30};
+    const perspective = 0.6; 
+    for(let i=0;i<slots;i++){
+        const start = i*(2*Math.PI/slots);
+        const end = (i+1)*(2*Math.PI/slots);
+        ctx.beginPath();
+        ctx.moveTo(center.x, center.y);
+        ctx.ellipse(center.x, center.y, radius, radius*perspective, 0, start, end);
+        ctx.fillStyle = i%2===0?'#ff4d4d':'#222';
+        ctx.fill();
+        ctx.strokeStyle='#111'; ctx.stroke();
+    }
+    // Ball
+    const ballR=12;
+    const ballX=center.x + Math.cos(ballAngle)*(radius-30);
+    const ballY=center.y + Math.sin(ballAngle)*(radius-30)*perspective;
+    const grad=ctx.createRadialGradient(ballX,ballY,2,ballX,ballY,ballR);
+    grad.addColorStop(0,'#fff2b2'); grad.addColorStop(0.5,'#ffd66b'); grad.addColorStop(1,'#ff8c00');
+    ctx.fillStyle=grad;
+    ctx.beginPath(); ctx.arc(ballX,ballY,ballR,0,Math.PI*2); ctx.fill();
+    // Center circle
+    ctx.beginPath(); ctx.arc(center.x, center.y, 20, 0, Math.PI*2); ctx.fillStyle='#071021'; ctx.fill();
 }
 
-// Timer
-function updateTimer(){
-  if(!lockedUntil){ document.getElementById('timer').innerText=''; return; }
-  const remaining = lockedUntil - Date.now();
-  if(remaining<=0){ lockedUntil=null; document.getElementById('spin').disabled = guessColor?false:true; document.getElementById('timer').innerText=''; localStorage.setItem(STORAGE_KEY,JSON.stringify({chips,history,lockedUntil:null})); return; }
-  const hrs=Math.floor(remaining/3600000);
-  const mins=Math.floor((remaining%3600000)/60000);
-  const secs=Math.floor((remaining%60000)/1000);
-  document.getElementById('timer').innerText=`Next unlock: ${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+// Update history
+function updateHistory(){
+    const hEl=document.getElementById('history');
+    hEl.innerHTML='History:<br>';
+    history.slice(0,10).forEach(h=>{
+        hEl.innerHTML+=`[${h.color}] Bet:${h.bet} → ${h.win?'+':''}${h.result}<br>`;
+    });
 }
-setInterval(updateTimer,1000);
 
-// Color buttons
-const redBtn=document.getElementById('redBtn');
-const blackBtn=document.getElementById('blackBtn');
-
-redBtn.addEventListener('click',()=>{
-  guessColor='red';
-  redBtn.classList.add('selected'); blackBtn.classList.remove('selected');
-  if(!lockedUntil) document.getElementById('spin').disabled=false;
-});
-blackBtn.addEventListener('click',()=>{
-  guessColor='black';
-  blackBtn.classList.add('selected'); redBtn.classList.remove('selected');
-  if(!lockedUntil) document.getElementById('spin').disabled=false;
-});
-
-// Spin
-document.getElementById('spin').addEventListener('click',()=>{
-  if(spinning || !guessColor || lockedUntil) return;
-  let betAmt=parseInt(document.getElementById('bet').value)||0;
-  if(betAmt>chips) betAmt=chips;
-  if(betAmt<=0) return;
-
-  chips -= betAmt; document.getElementById('chips').innerText=chips;
-
-  // Decide ball landing
-  const winChance=0.35; // less than 50%
-  const willWin=Math.random()<winChance;
-  const finalColor=willWin?guessColor:(guessColor==='red'?'black':'red');
-
-  // Map finalColor to segment
-  const redSlots=18, blackSlots=18;
-  let targetSlot;
-  if(finalColor==='red') targetSlot=Math.floor(Math.random()*redSlots)*2;
-  else targetSlot=Math.floor(Math.random()*blackSlots)*2+1;
-
-  const spinDur=4000+Math.random()*2000;
-  const start=performance.now();
-  const startAngle=ballAngle;
-
-  spinning=true;
-  function animate(now){
-    const t=(now-start)/spinDur;
-    const ease=1 - Math.pow(1-t,3);
-    ballAngle=startAngle + ease*(targetSlot*2*Math.PI/slots - startAngle);
-    drawWheel();
-    if(t<1) requestAnimationFrame(animate);
-    else finish();
-  }
-
-  function finish(){
-    const color=finalColor;
-    const win=color===guessColor;
-    const result=win?betAmt*2:0;
-    if(win) chips+=result;
-
-    if(chips>=200 || chips<=0){
-      if(chips>=200) chips=200;
-      if(chips<=0) chips=0;
-      lockedUntil=Date.now()+24*60*60*1000;
-      document.getElementById('spin').disabled=true;
+// Spin logic
+spinBtn.addEventListener('click', ()=>{
+    if(spinning || !selectedColor) return;
+    
+    const now = Date.now();
+    if(unlockTime>now){
+        alert('Game locked until next day!');
+        return;
     }
 
-    document.getElementById('chips').innerText=chips;
-    history.unshift({color,bet:betAmt,win,result}); history=history.slice(0,200);
-    updateHistory();
-    localStorage.setItem(STORAGE_KEY,JSON.stringify({chips,history,lockedUntil}));
-    spinning=false;
-  }
+    let bet = Math.min(10,chips); // fixed bet for simplicity
+    chips -= bet;
+    document.getElementById('chips').innerText = chips;
+    
+    // Decide result with ~35% chance to win
+    const winChance = 0.35;
+    const win = Math.random()<winChance;
+    const finalColor = win?selectedColor:(selectedColor==='red'?'black':'red');
+    const targetSlot = finalColor==='red' ? Math.floor(Math.random()*18)*2 : Math.floor(Math.random()*18)*2+1;
 
-  requestAnimationFrame(animate);
+    // Animate ball clockwise slowly
+    const startAngle = ballAngle;
+    const spinDur = 4000 + Math.random()*2000;
+    const startTime = performance.now();
+    spinning = true;
+    function animate(now){
+        const t = (now-startTime)/spinDur;
+        const ease = 1 - Math.pow(1-t,3);
+        ballAngle = startAngle + ease*((targetSlot*2*Math.PI/slots)-startAngle);
+        drawWheel();
+        if(t<1) requestAnimationFrame(animate);
+        else finish();
+    }
+
+    function finish(){
+        const result = win?bet*2:0;
+        if(win) chips += result;
+        if(chips>=200) { chips=200; spinBtn.disabled=true; }
+        if(chips<=0) { chips=0; spinBtn.disabled=true; }
+        document.getElementById('chips').innerText = chips;
+        history.unshift({color:finalColor,bet,win,result});
+        history=history.slice(0,200);
+        updateHistory();
+        // lock until same time next day
+        unlockTime = Date.now() + 24*60*60*1000;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({chips,history,unlockTime}));
+        spinning=false;
+        spinBtn.disabled=true;
+        selectedColor=null;
+        redBtn.style.outline='none';
+        blackBtn.style.outline='none';
+    }
+    requestAnimationFrame(animate);
 });
 
 // Reset
 document.getElementById('reset').addEventListener('click',()=>{
-  chips=50; history=[]; guessColor=null; spinning=false; lockedUntil=null;
-  redBtn.classList.remove('selected'); blackBtn.classList.remove('selected');
-  document.getElementById('chips').innerText=chips;
-  document.getElementById('spin').disabled=true;
-  localStorage.removeItem(STORAGE_KEY);
-  updateHistory();
+    chips=50; history=[]; spinning=false; selectedColor=null;
+    unlockTime=0;
+    document.getElementById('chips').innerText=chips;
+    spinBtn.disabled=true;
+    redBtn.style.outline='none';
+    blackBtn.style.outline='none';
+    localStorage.removeItem(STORAGE_KEY);
+    updateHistory();
 });
 
-drawWheel(); updateHistory();
-if(lockedUntil) document.getElementById('spin').disabled=true;
+// Initial draw
+drawWheel();
+updateHistory();
 </script>
+
 </body>
 </html>
