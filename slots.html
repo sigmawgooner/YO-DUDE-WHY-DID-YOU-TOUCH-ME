@@ -18,7 +18,7 @@
 </style>
 </head>
 <body>
-<canvas id="slots" width="360" height="300"></canvas>
+<canvas id="slots" width="360" height="100"></canvas>
 <div id="controls">
   <button id="spin">SPIN (25 chips)</button>
   <button id="reset">RESET</button>
@@ -30,11 +30,10 @@ const canvas = document.getElementById('slots');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height;
 const reelCount = 3;
-const symbols = ['🍒','🍋','🍊','🍉','⭐','💎']; // classic emoji symbols
-const symbolHeight = 80;
+const symbols = ['🍒','🍋','🍊','🍉','⭐','💎'];
 const spinCost = 25;
 const maxChips = 500;
-const STORAGE_KEY='slotmachine.session.v1';
+const STORAGE_KEY='slotmachine.session.v2';
 let reels=[], spinning=false;
 let chips=100, jackpot=50;
 let lastWinTime = null;
@@ -62,21 +61,18 @@ for(let i=0;i<reelCount;i++){
   reels.push({pos:0,vel:0,target:0});
 }
 
-// Draw reels
+// Draw reels (single line)
 function draw(){
   ctx.clearRect(0,0,width,height);
   const reelWidth = width/reelCount;
   ctx.textAlign='center';
   ctx.textBaseline='middle';
-  ctx.font = symbolHeight+'px sans-serif';
+  ctx.font = '80px sans-serif';
   for(let i=0;i<reelCount;i++){
     const r=reels[i];
-    const yOffset = r.pos%symbolHeight;
-    for(let j=-1;j<=symbols.length;j++){
-      const sym = symbols[(j+symbols.length)%symbols.length];
-      const y = height/2 + (j)*symbolHeight - yOffset;
-      ctx.fillText(sym, i*reelWidth + reelWidth/2, y);
-    }
+    const symIndex = Math.floor(r.pos/symbolHeight) % symbols.length;
+    const sym = symbols[(symIndex+symbols.length)%symbols.length];
+    ctx.fillText(sym, i*reelWidth + reelWidth/2, height/2);
     // Reel separator
     ctx.strokeStyle='#222';
     ctx.lineWidth=4;
@@ -85,14 +81,17 @@ function draw(){
   }
 }
 
+const symbolHeight = 80; // for single line display
+
 // Spin animation
 function spin(){
   if(spinning) return;
-  if(isLocked()) { alert("You reached 500 chips! Come back in 24 hours."); return; }
+  if(chips>=maxChips){ alert("You reached the max! Come back tomorrow."); return; }
   if(chips<spinCost) { alert("Not enough chips!"); return; }
-  spinning=true;
   chips -= spinCost;
   document.getElementById('chips').innerText=chips;
+
+  spinning=true;
 
   // Decide result
   const results = [];
@@ -101,7 +100,7 @@ function spin(){
     results.push(symIndex);
   }
 
-  // Make it slightly unfair: 35% chance all symbols match if player expects
+  // Slight unfair chance
   if(Math.random()<0.35){
     const common = Math.floor(Math.random()*symbols.length);
     for(let i=0;i<reelCount;i++) results[i]=common;
@@ -109,11 +108,11 @@ function spin(){
 
   // Set target position
   for(let i=0;i<reelCount;i++){
-    reels[i].target = results[i]*symbolHeight + symbolHeight*3 + Math.random()*symbolHeight; // add extra spins
+    reels[i].target = results[i]*symbolHeight + symbolHeight*3; // extra spins
     reels[i].vel = 0;
   }
 
-  const deceleration = 0.05;
+  const deceleration = 0.02; // slower
 
   function animate(){
     let done=true;
@@ -122,8 +121,8 @@ function spin(){
       const diff = r.target - r.pos;
       if(Math.abs(diff)>0.5){
         done=false;
-        r.vel += diff*0.2;
-        r.vel *= 0.9;
+        r.vel += diff*deceleration;
+        r.vel *= 0.92; // slower friction
         r.pos += r.vel;
       } else {
         r.pos = r.target;
@@ -148,13 +147,12 @@ function finish(results){
     lastWinTime = new Date().toISOString();
   } else {
     jackpot += 10;
-    chips = Math.max(chips, spinCost); // give enough to spin again if lost
+    chips = Math.max(chips, spinCost); // enough to spin again
   }
   document.getElementById('chips').innerText=chips;
   document.getElementById('jackpot').innerText=jackpot;
   localStorage.setItem(STORAGE_KEY, JSON.stringify({chips,jackpot,lastWinTime}));
   spinning=false;
-  if(chips>=maxChips){ alert("You hit the max! Come back tomorrow."); }
 }
 
 // Button events
