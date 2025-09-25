@@ -6,17 +6,58 @@
 <title>Slot Machine</title>
 <style>
 body {
-  margin:0; background:#071021; display:flex; flex-direction:column;
-  align-items:center; justify-content:center; font-family:monospace; color:#fff; height:100vh;
+  margin:0;
+  background:#071021;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  font-family:monospace;
+  color:#fff;
+  height:100vh;
 }
-#machine { width:400px; height:360px;
-  background:linear-gradient(#333,#111); border-radius:30px; box-shadow:0 12px 40px rgba(0,0,0,0.8);
-  padding:20px; display:flex; flex-direction:column; align-items:center; }
-#screen { width:360px; height:200px; background:#222; border:4px solid #555; border-radius:12px;
-  display:flex; justify-content:space-between; padding:10px; box-shadow:inset 0 0 20px #000; overflow:hidden;}
-.reel { width:100px; height:180px; background:#111; border-radius:10px; overflow:hidden;
-  border:2px solid #333; display:flex; flex-direction:column; align-items:center; position:relative; }
-.symbol { width:100%; height:60px; text-align:center; line-height:60px; font-size:48px; font-weight:800; }
+#machine {
+  width:400px;
+  background:linear-gradient(#222,#111);
+  border-radius:30px;
+  box-shadow:0 12px 40px rgba(0,0,0,0.8);
+  padding:20px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+#screen {
+  width:360px;
+  height:200px;
+  background:#222;
+  border:4px solid #555;
+  border-radius:12px;
+  display:flex;
+  justify-content:space-between;
+  padding:10px;
+  overflow:hidden;
+  box-shadow: inset 0 0 20px #000;
+}
+.reel {
+  width:100px;
+  height:180px;
+  background:#111;
+  border-radius:10px;
+  overflow:hidden;
+  border:2px solid #333;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  position:relative;
+}
+.symbol {
+  width:100%;
+  height:60px;
+  text-align:center;
+  line-height:60px;
+  font-size:48px;
+  font-weight:800;
+}
 #controls { margin-top:12px; display:flex; flex-direction:column; align-items:center; gap:8px; }
 button { padding:10px 20px; border-radius:10px; cursor:pointer; font-weight:800; font-size:16px; background:#0f766e; color:#fff; border:none; }
 #info { margin-top:12px; font-size:16px; color:#ffd66b; text-align:center; }
@@ -43,7 +84,7 @@ button { padding:10px 20px; border-radius:10px; cursor:pointer; font-weight:800;
 <div id="jackpot">Jackpot: <span id="jackpotVal">100</span></div>
 
 <script>
-const STORAGE_KEY='slot.machine.button.v1';
+const STORAGE_KEY='slot.machine.v2';
 let points=100,jackpot=100,lockedUntil=0,spinning=false;
 const symbols=['🍒','🍋','🍊','⭐','💎','7️⃣'];
 const reels=[document.getElementById('reel0'),document.getElementById('reel1'),document.getElementById('reel2')];
@@ -99,7 +140,7 @@ function initializeReels(){
 }
 
 // === SPIN FUNCTION ===
-function spinReelAnimated(reel,duration=2000){
+function spinReel(reel,duration=2000){
   return new Promise(resolve=>{
     const startTime=performance.now();
     const finalSymbol=symbols[Math.floor(Math.random()*symbols.length)];
@@ -109,10 +150,9 @@ function spinReelAnimated(reel,duration=2000){
       reel.innerHTML='';
       for(let i=0;i<3;i++){
         const sym=document.createElement('div'); sym.className='symbol';
-        sym.innerText = t<0.8 ? symbols[Math.floor(Math.random()*symbols.length)] : finalSymbol;
+        sym.innerText = t<0.9 ? symbols[Math.floor(Math.random()*symbols.length)] : finalSymbol;
         reel.appendChild(sym);
       }
-      playSound(300+Math.random()*200,0.03);
       if(t<1) requestAnimationFrame(animate);
       else resolve(finalSymbol);
     }
@@ -126,7 +166,7 @@ async function startSpin(){
   points-=25; updateDisplay(); spinning=true;
 
   const results=[];
-  for(let i=0;i<3;i++) results.push(await spinReelAnimated(reels[i]));
+  for(let i=0;i<3;i++) results.push(await spinReel(reels[i]));
 
   const allMatch=results.every(s=>s===results[0]);
   const winPoints=allMatch?jackpot:Math.floor(Math.random()*20)+5;
