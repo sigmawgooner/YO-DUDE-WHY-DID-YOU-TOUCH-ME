@@ -32,17 +32,57 @@ const width = canvas.width, height = canvas.height;
 const rows = 12, slotCount = rows + 1;
 const STORAGE_KEY = 'pachinko.canvas.session.v8';
 const POINT_CAP = 200;
+const RESET_INTERVAL = 12*60*60*1000; // 12 hours
 
-let displayTotal = 0, history = [], ball = null, dropping = false;
+let displayTotal = 0, history = [], ball = null, dropping = false, lastReset = Date.now();
 
 // Load saved data
 try { 
   const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-  displayTotal = stored?.total || 0; 
-  history = stored?.history || [];
+  if(stored){
+    const elapsed = Date.now() - (stored.lastReset || Date.now());
+    if(elapsed >= RESET_INTERVAL){
+      displayTotal = 0;
+      history = [];
+      lastReset = Date.now();
+    } else {
+      displayTotal = stored.total || 0;
+      history = stored.history || [];
+      lastReset = stored.lastReset || Date.now();
+    }
+  }
 } catch{}
 document.getElementById('total').innerText = displayTotal;
 if(history.length) document.getElementById('last').innerText = `Last: ${history[0].points}pts (slot ${history[0].slot})`;
+
+// Timer for 12-hour reset
+const timerEl = document.createElement('div');
+timerEl.style.position='absolute';
+timerEl.style.top='12px';
+timerEl.style.left='12px';
+timerEl.style.color='#ffd66b';
+timerEl.style.fontWeight='bold';
+timerEl.style.fontFamily='monospace';
+document.body.appendChild(timerEl);
+
+function updateTimer(){
+  const remaining = Math.max(0, RESET_INTERVAL - (Date.now() - lastReset));
+  const hrs = Math.floor(remaining / 3600000);
+  const mins = Math.floor((remaining % 3600000)/60000);
+  const secs = Math.floor((remaining % 60000)/1000);
+  timerEl.innerText = `Reset in ${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+  if(remaining <= 0){
+    displayTotal = 0;
+    history = [];
+    lastReset = Date.now();
+    localStorage.removeItem(STORAGE_KEY);
+    document.getElementById('total').innerText = displayTotal;
+    document.getElementById('last').innerText = 'Last: —';
+    document.getElementById('drop').disabled = false;
+  }
+}
+setInterval(updateTimer, 1000);
+updateTimer();
 
 // Initialize base scores
 const baseScores = Array.from({ length: slotCount }, (_, i) => Math.max(1, 50 - Math.abs(i - (slotCount-1)/2)*8));
@@ -156,7 +196,7 @@ function revealScore(idx){
       history.unshift({slot:idx, points:pts, ts:new Date().toISOString()});
       history=history.slice(0,200);
       document.getElementById('last').innerText = `Last: ${pts}pts (slot ${idx})`;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({total:displayTotal,history}));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({total:displayTotal,history,lastReset}));
       if(displayTotal>=POINT_CAP) document.getElementById('drop').disabled=true;
     }
   }
@@ -187,6 +227,7 @@ document.getElementById('drop').addEventListener('click', ()=>{
 // Reset points
 document.getElementById('reset').addEventListener('click', ()=>{
   displayTotal=0; history=[]; ball=null; dropping=false;
+  lastReset = Date.now();
   localStorage.removeItem(STORAGE_KEY);
   document.getElementById('total').innerText=displayTotal;
   document.getElementById('last').innerText='Last: —';
