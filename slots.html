@@ -5,14 +5,81 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Slot Machine</title>
 <style>
-  body { margin:0; background:#071021; display:flex; flex-direction:column; align-items:center; font-family:monospace; color:#fff; height:100vh; justify-content:center;}
-  #machine { position:relative; width:360px; height:480px; background:#222; border-radius:20px; box-shadow:0 12px 40px rgba(0,0,0,0.8); overflow:hidden; }
-  #reels { display:flex; justify-content:space-between; padding:20px; }
-  .reel { width:80px; height:200px; background:#111; border-radius:12px; overflow:hidden; position:relative; }
-  .symbol { width:100%; height:80px; text-align:center; line-height:80px; font-size:24px; font-weight:800; border-bottom:1px solid #333; }
-  #lever { margin-top:20px; padding:10px 20px; font-weight:800; border-radius:12px; cursor:pointer; background:#0f766e; color:#fff; }
-  #info { margin-top:12px; font-size:16px; color:#ffd66b; text-align:center; }
-  #jackpot { font-size:14px; color:#ff8c00; margin-top:4px; }
+body {
+  margin:0;
+  background:#071021;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  font-family:monospace;
+  color:#fff;
+  height:100vh;
+  justify-content:center;
+}
+#machine {
+  position:relative;
+  width:360px;
+  height:480px;
+  background:#222;
+  border-radius:20px;
+  box-shadow:0 12px 40px rgba(0,0,0,0.8);
+  overflow:hidden;
+  padding:20px;
+}
+#reels {
+  display:flex;
+  justify-content:space-between;
+  margin-top:20px;
+}
+.reel {
+  width:80px;
+  height:200px;
+  background:#111;
+  border-radius:12px;
+  overflow:hidden;
+  position:relative;
+  border:2px solid #333;
+}
+.symbol {
+  width:100%;
+  height:80px;
+  text-align:center;
+  line-height:80px;
+  font-size:36px;
+  font-weight:800;
+  border-bottom:1px solid #333;
+}
+#lever {
+  position:absolute;
+  right:-40px;
+  top:50px;
+  width:40px;
+  height:120px;
+  background:#0f766e;
+  border-radius:20px;
+  cursor:pointer;
+  display:flex;
+  justify-content:center;
+  align-items:flex-start;
+  transition:0.2s;
+  color:#fff;
+  font-weight:800;
+  user-select:none;
+}
+#lever:active {
+  transform:translateY(80px) rotate(15deg);
+}
+#info {
+  margin-top:12px;
+  font-size:16px;
+  color:#ffd66b;
+  text-align:center;
+}
+#jackpot {
+  font-size:14px;
+  color:#ff8c00;
+  margin-top:4px;
+}
 </style>
 </head>
 <body>
@@ -23,95 +90,105 @@
     <div class="reel" id="reel1"></div>
     <div class="reel" id="reel2"></div>
   </div>
+  <div id="lever">⛓</div>
 </div>
-<button id="lever">PULL LEVER</button>
+
 <div id="info">Points: <span id="points">100</span> | Cost: 25 per spin</div>
 <div id="jackpot">Jackpot: <span id="jackpotVal">100</span></div>
 
 <script>
-const STORAGE_KEY = 'slot.machine.v1';
-let points = 100, jackpot = 100, lastWin = 0, lockedUntil = 0, spinning = false;
-
-const symbols = ['🍒','🍋','🍊','⭐','💎','7️⃣']; // symbols for slots
-const reels = [document.getElementById('reel0'), document.getElementById('reel1'), document.getElementById('reel2')];
+// === STORAGE & VARIABLES ===
+const STORAGE_KEY='slot.machine.v2';
+let points=100, jackpot=100, lockedUntil=0, spinning=false;
+const symbols=['🍒','🍋','🍊','⭐','💎','7️⃣'];
+const reels=[document.getElementById('reel0'), document.getElementById('reel1'), document.getElementById('reel2')];
 
 // Load saved state
 try{
-  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-  points = stored?.points || 100;
-  jackpot = stored?.jackpot || 100;
-  lockedUntil = stored?.lockedUntil || 0;
-} catch{}
-
-function updateDisplay(){
-  document.getElementById('points').innerText = points;
-  document.getElementById('jackpotVal').innerText = jackpot;
-}
+  const stored=JSON.parse(localStorage.getItem(STORAGE_KEY));
+  points=stored?.points||100;
+  jackpot=stored?.jackpot||100;
+  lockedUntil=stored?.lockedUntil||0;
+}catch{}
 updateDisplay();
-
-function checkLock(){
-  const now = Date.now();
-  if(now < lockedUntil){
-    spinning = true;
-    document.getElementById('lever').disabled = true;
-    const remaining = Math.ceil((lockedUntil-now)/1000);
-    document.getElementById('info').innerText = `LOCKED! Come back in ${remaining}s`;
-    setTimeout(checkLock,1000);
-  } else {
-    spinning=false;
-    document.getElementById('lever').disabled = false;
-    document.getElementById('info').innerText = `Points: ${points} | Cost: 25 per spin`;
-  }
-}
 checkLock();
 
-function saveState(){
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({points,jackpot,lockedUntil}));
+// === AUDIO ===
+let audioCtx;
+function ensureAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+function playSound(freq,dur){
+  const ctx=ensureAudio(); if(!ctx)return;
+  const o=ctx.createOscillator(),g=ctx.createGain();
+  o.frequency.value=freq; o.connect(g); g.connect(ctx.destination); g.gain.value=0.08;
+  o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+dur); o.stop(ctx.currentTime+dur+0.05);
 }
 
+// === DISPLAY ===
+function updateDisplay(){
+  document.getElementById('points').innerText=points;
+  document.getElementById('jackpotVal').innerText=jackpot;
+}
+function saveState(){
+  localStorage.setItem(STORAGE_KEY,JSON.stringify({points,jackpot,lockedUntil}));
+}
+
+// === LOCK SYSTEM ===
+function checkLock(){
+  const now=Date.now();
+  if(now<lockedUntil){
+    spinning=true;
+    document.getElementById('lever').style.pointerEvents='none';
+    const remaining=Math.ceil((lockedUntil-now)/1000);
+    document.getElementById('info').innerText=`LOCKED! Come back in ${remaining}s`;
+    setTimeout(checkLock,1000);
+  }else{
+    spinning=false;
+    document.getElementById('lever').style.pointerEvents='auto';
+    document.getElementById('info').innerText=`Points: ${points} | Cost: 25 per spin`;
+  }
+}
+
+// === REEL SPINNING ===
 function spinReel(reel){
   return new Promise(resolve=>{
     const totalSymbols = symbols.length;
-    let position = 0;
-    const spins = 20 + Math.floor(Math.random()*10); // more spins = tension
-    const stepTime = 100 + Math.random()*50; // slower for suspense
-    let count = 0;
-    const interval = setInterval(()=>{
-      reel.innerHTML = `<div class="symbol">${symbols[position]}</div>`;
-      position = (position+1)%totalSymbols;
+    let pos=0;
+    const spins=25+Math.floor(Math.random()*10);
+    const stepTime=120+Math.random()*50;
+    let count=0;
+    const interval=setInterval(()=>{
+      reel.innerHTML=`<div class="symbol">${symbols[pos]}</div>`;
+      pos=(pos+1)%totalSymbols;
       count++;
-      if(count>=spins){ clearInterval(interval); resolve(symbols[position]); }
+      playSound(400+(pos*40),0.05);
+      if(count>=spins){ clearInterval(interval); resolve(symbols[pos]); }
     }, stepTime);
   });
 }
 
+// === LEVER PULL ===
 document.getElementById('lever').addEventListener('click', async ()=>{
   if(spinning) return;
-  if(points<25) points=25; // always have enough to play
-  points -= 25; updateDisplay();
+  if(points<25) points=25;
+  points-=25; updateDisplay();
   spinning=true;
 
-  // spin all reels
-  const results = [];
-  for(let i=0;i<3;i++){
-    results.push(await spinReel(reels[i]));
-  }
+  const results=[];
+  for(let i=0;i<3;i++) results.push(await spinReel(reels[i]));
 
   // determine outcome
-  const allMatch = results.every(s=>s===results[0]);
-  const winPoints = allMatch ? jackpot : Math.floor(Math.random()*20)+5; // small consolation
-  points += winPoints;
-  lastWin = winPoints;
-
-  // scale jackpot if win
+  const allMatch=results.every(s=>s===results[0]);
+  const winPoints=allMatch?jackpot:Math.floor(Math.random()*20)+5;
+  points+=winPoints;
   if(allMatch){
-    jackpot = Math.floor(jackpot*1.5);
-    points = 500; // cap
-    const now = new Date();
-    lockedUntil = now.getTime() + 24*60*60*1000;
+    jackpot=Math.floor(jackpot*1.5);
+    points=500; // cap
+    lockedUntil=Date.now()+24*60*60*1000;
     checkLock();
-  } else {
-    jackpot += 10; // small increase each spin
+    playSound(1000,0.5); // jackpot sound
+  }else{
+    jackpot+=10;
+    playSound(300,0.15);
   }
 
   updateDisplay();
