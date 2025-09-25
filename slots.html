@@ -5,208 +5,170 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Slot Machine</title>
 <style>
-body {
-  margin:0;
-  background:#071021;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  font-family:monospace;
-  color:#fff;
-  height:100vh;
-}
-#machine {
-  width:400px;
-  background:linear-gradient(#222,#111);
-  border-radius:30px;
-  box-shadow:0 12px 40px rgba(0,0,0,0.8);
-  padding:20px;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-}
-#screen {
-  width:360px;
-  height:180px;
-  background:#222;
-  border:4px solid #555;
-  border-radius:12px;
-  display:flex;
-  justify-content:space-between;
-  overflow:hidden;
-  padding:10px;
-  box-shadow: inset 0 0 20px #000;
-}
-.reel {
-  width:100px;
-  height:180px;
-  background:#111;
-  border-radius:10px;
-  overflow:hidden;
-  border:2px solid #333;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  position:relative;
-}
-.symbol {
-  width:100%;
-  height:60px;
-  text-align:center;
-  line-height:60px;
-  font-size:48px;
-}
-#controls { margin-top:12px; display:flex; flex-direction:column; align-items:center; gap:8px; }
-button { padding:10px 20px; border-radius:10px; cursor:pointer; font-weight:800; font-size:16px; background:#0f766e; color:#fff; border:none; }
-#info { margin-top:12px; font-size:16px; color:#ffd66b; text-align:center; }
-#jackpot { font-size:14px; color:#ff8c00; margin-top:4px; }
-.flash { animation:flashAnim 0.5s ease infinite; }
-@keyframes flashAnim { 0%,100%{background-color:yellow;} 50%{background-color:transparent;} }
+  body { 
+    margin:0; background:#071021; color:#fff; font-family:monospace; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh;
+  }
+  canvas { 
+    background:#0b1a2f; border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,0.7); 
+  }
+  #controls { margin-top:16px; display:flex; gap:12px; align-items:center; }
+  button { padding:8px 16px; font-weight:800; border-radius:8px; cursor:pointer; }
+  #spin { background:#0f766e; color:#fff; }
+  #info { margin-top:12px; font-size:16px; color:#ffd66b; text-align:center; }
 </style>
 </head>
 <body>
-
-<div id="machine">
-  <div id="screen">
-    <div class="reel" id="reel0"></div>
-    <div class="reel" id="reel1"></div>
-    <div class="reel" id="reel2"></div>
-  </div>
-</div>
-
+<canvas id="slots" width="360" height="300"></canvas>
 <div id="controls">
-  <button id="spinBtn">SPIN</button>
+  <button id="spin">SPIN (25 chips)</button>
+  <button id="reset">RESET</button>
 </div>
-
-<div id="info">Points: <span id="points">100</span> | Cost: 25 per spin</div>
-<div id="jackpot">Jackpot: <span id="jackpotVal">100</span></div>
+<div id="info">Chips: <span id="chips">100</span> | Jackpot: <span id="jackpot">50</span></div>
 
 <script>
-const STORAGE_KEY='slot.machine.v3';
-let points=100,jackpot=100,lockedUntil=0,spinning=false;
-const symbols=['🍒','🍋','🍊','⭐','💎','7️⃣'];
-const reels=[document.getElementById('reel0'),document.getElementById('reel1'),document.getElementById('reel2')];
+const canvas = document.getElementById('slots');
+const ctx = canvas.getContext('2d');
+const width = canvas.width, height = canvas.height;
+const reelCount = 3;
+const symbols = ['🍒','🍋','🍊','🍉','⭐','💎']; // classic emoji symbols
+const symbolHeight = 80;
+const spinCost = 25;
+const maxChips = 500;
+const STORAGE_KEY='slotmachine.session.v1';
+let reels=[], spinning=false;
+let chips=100, jackpot=50;
+let lastWinTime = null;
 
-// Load storage
-try{
-  const stored=JSON.parse(localStorage.getItem(STORAGE_KEY));
-  points=stored?.points||100;
-  jackpot=stored?.jackpot||100;
-  lockedUntil=stored?.lockedUntil||0;
-}catch{}
-updateDisplay();
-checkLock();
+// Load saved data
+try {
+  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+  chips = stored?.chips || 100;
+  jackpot = stored?.jackpot || 50;
+  lastWinTime = stored?.lastWinTime || null;
+} catch{}
+document.getElementById('chips').innerText=chips;
+document.getElementById('jackpot').innerText=jackpot;
 
-// === AUDIO ===
-let audioCtx;
-function ensureAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
-function playSound(freq,dur){const ctx=ensureAudio(); if(!ctx)return;
-const o=ctx.createOscillator(),g=ctx.createGain(); o.frequency.value=freq; o.connect(g); g.connect(ctx.destination); g.gain.value=0.08;
-o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+dur); o.stop(ctx.currentTime+dur+0.05);}
+// 24-hour lock check
+function isLocked() {
+  if(!lastWinTime) return false;
+  const next = new Date(lastWinTime);
+  next.setHours(next.getHours()+24);
+  return new Date() < next;
+}
 
-// === DISPLAY ===
-function updateDisplay(){ document.getElementById('points').innerText=points; document.getElementById('jackpotVal').innerText=jackpot; }
-function saveState(){ localStorage.setItem(STORAGE_KEY,JSON.stringify({points,jackpot,lockedUntil})); }
+// Initialize reels
+for(let i=0;i<reelCount;i++){
+  reels.push({pos:0,vel:0,target:0});
+}
 
-// === LOCK SYSTEM ===
-function checkLock(){
-  const now=Date.now();
-  if(now<lockedUntil){
-    spinning=true;
-    document.getElementById('spinBtn').disabled=true;
-    const remaining=Math.ceil((lockedUntil-now)/1000);
-    document.getElementById('info').innerText=`LOCKED! Come back in ${remaining}s`;
-    setTimeout(checkLock,1000);
-  }else{
-    spinning=false;
-    document.getElementById('spinBtn').disabled=false;
-    document.getElementById('info').innerText=`Points: ${points} | Cost: 25 per spin`;
+// Draw reels
+function draw(){
+  ctx.clearRect(0,0,width,height);
+  const reelWidth = width/reelCount;
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.font = symbolHeight+'px sans-serif';
+  for(let i=0;i<reelCount;i++){
+    const r=reels[i];
+    const yOffset = r.pos%symbolHeight;
+    for(let j=-1;j<=symbols.length;j++){
+      const sym = symbols[(j+symbols.length)%symbols.length];
+      const y = height/2 + (j)*symbolHeight - yOffset;
+      ctx.fillText(sym, i*reelWidth + reelWidth/2, y);
+    }
+    // Reel separator
+    ctx.strokeStyle='#222';
+    ctx.lineWidth=4;
+    ctx.beginPath();
+    ctx.moveTo((i+1)*reelWidth,0); ctx.lineTo((i+1)*reelWidth,height); ctx.stroke();
   }
 }
 
-// === REELS ===
-function createReel(){
-  const reel=[];
-  for(let i=0;i<20;i++) reel.push(symbols[Math.floor(Math.random()*symbols.length)]);
-  return reel;
-}
-const reelData=[createReel(),createReel(),createReel()];
-
-// === SPIN FUNCTION ===
-function spinSlot(){
-  if(spinning || points<25) return;
-  points-=25;
-  updateDisplay();
+// Spin animation
+function spin(){
+  if(spinning) return;
+  if(isLocked()) { alert("You reached 500 chips! Come back in 24 hours."); return; }
+  if(chips<spinCost) { alert("Not enough chips!"); return; }
   spinning=true;
+  chips -= spinCost;
+  document.getElementById('chips').innerText=chips;
 
-  const finalSymbols=[symbols[Math.floor(Math.random()*symbols.length)],
-                      symbols[Math.floor(Math.random()*symbols.length)],
-                      symbols[Math.floor(Math.random()*symbols.length)]];
+  // Decide result
+  const results = [];
+  for(let i=0;i<reelCount;i++){
+    const symIndex = Math.floor(Math.random()*symbols.length);
+    results.push(symIndex);
+  }
 
-  const durations=[2000,2500,3000]; // each reel stops at different time
-  const startTime=performance.now();
+  // Make it slightly unfair: 35% chance all symbols match if player expects
+  if(Math.random()<0.35){
+    const common = Math.floor(Math.random()*symbols.length);
+    for(let i=0;i<reelCount;i++) results[i]=common;
+  }
+
+  // Set target position
+  for(let i=0;i<reelCount;i++){
+    reels[i].target = results[i]*symbolHeight + symbolHeight*3 + Math.random()*symbolHeight; // add extra spins
+    reels[i].vel = 0;
+  }
+
+  const deceleration = 0.05;
 
   function animate(){
-    const now=performance.now();
-    let doneCount=0;
-    reels.forEach((r,i)=>{
-      const t=(now-startTime)/durations[i];
-      r.innerHTML='';
-      for(let j=0;j<3;j++){
-        const symDiv=document.createElement('div');
-        symDiv.className='symbol';
-        if(t>=1) symDiv.innerText=finalSymbols[i];
-        else symDiv.innerText=symbols[Math.floor(Math.random()*symbols.length)];
-        r.appendChild(symDiv);
+    let done=true;
+    for(let i=0;i<reelCount;i++){
+      const r=reels[i];
+      const diff = r.target - r.pos;
+      if(Math.abs(diff)>0.5){
+        done=false;
+        r.vel += diff*0.2;
+        r.vel *= 0.9;
+        r.pos += r.vel;
+      } else {
+        r.pos = r.target;
       }
-      if(t>=1) doneCount++;
-    });
-    if(doneCount<3) requestAnimationFrame(animate);
-    else finish(finalSymbols);
+    }
+    draw();
+    if(!done) requestAnimationFrame(animate);
+    else finish(results);
   }
   requestAnimationFrame(animate);
 }
 
-// === FINISH SPIN ===
-function finish(finalSymbols){
-  const allMatch=finalSymbols.every(s=>s===finalSymbols[0]);
-  const winPoints=allMatch?jackpot:Math.floor(Math.random()*20)+5;
-  points+=winPoints;
-
-  if(allMatch){
-    jackpot=Math.floor(jackpot*1.5);
-    points=500;
-    lockedUntil=Date.now()+24*60*60*1000;
-    flashReels();
-    checkLock();
-    playSound(1000,0.5);
-  }else{
-    jackpot+=10;
-    playSound(300,0.15);
+// Finish spin
+function finish(results){
+  let win=false;
+  if(results.every(v=>v===results[0])) win=true;
+  let winAmount=0;
+  if(win){
+    winAmount = jackpot;
+    chips += jackpot;
+    jackpot = 50;
+    lastWinTime = new Date().toISOString();
+  } else {
+    jackpot += 10;
+    chips = Math.max(chips, spinCost); // give enough to spin again if lost
   }
-
-  updateDisplay();
-  saveState();
+  document.getElementById('chips').innerText=chips;
+  document.getElementById('jackpot').innerText=jackpot;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({chips,jackpot,lastWinTime}));
   spinning=false;
+  if(chips>=maxChips){ alert("You hit the max! Come back tomorrow."); }
 }
 
-function flashReels(){ reels.forEach(r=>r.classList.add('flash')); setTimeout(()=>reels.forEach(r=>r.classList.remove('flash')),1000); }
-
-// BUTTON
-document.getElementById('spinBtn').addEventListener('click',spinSlot);
-
-// INITIALIZE REELS DISPLAY
-reels.forEach(r=>{
-  r.innerHTML='';
-  for(let i=0;i<3;i++){
-    const div=document.createElement('div');
-    div.className='symbol';
-    div.innerText=symbols[Math.floor(Math.random()*symbols.length)];
-    r.appendChild(div);
-  }
+// Button events
+document.getElementById('spin').addEventListener('click', spin);
+document.getElementById('reset').addEventListener('click',()=>{
+  chips=100; jackpot=50; lastWinTime=null;
+  document.getElementById('chips').innerText=chips;
+  document.getElementById('jackpot').innerText=jackpot;
+  localStorage.removeItem(STORAGE_KEY);
+  draw();
 });
-</script>
 
+// Initial draw
+draw();
+</script>
 </body>
 </html>
