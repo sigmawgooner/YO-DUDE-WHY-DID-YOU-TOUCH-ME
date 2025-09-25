@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red or Black Roulette</title>
+<style>
+  body { margin:0; background:#071021; display:flex; flex-direction:column; align-items:center; font-family:monospace; color:#fff; height:100vh; justify-content:center;}
+  canvas { background:#071021; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.7); display:block; margin:20px 0;}
+  #controls { margin-top:8px; display:flex; gap:8px; align-items:center; }
+  input { width:60px; padding:4px; border-radius:6px; text-align:center; font-weight:800; }
+  button { padding:6px 14px; border-radius:8px; cursor:pointer; font-weight:800; }
+  #spin { background:#0f766e; color:#fff; }
+  #reset { background:#2b2b2b; color:#fff; }
+  #info { margin-top:10px; font-size:14px; color:#ffd66b; }
+  #history { margin-top:6px; font-size:12px; color:#9aa6b2; max-height:120px; overflow-y:auto; text-align:left; width:300px; }
+</style>
+</head>
+<body>
+
+<div id="info">Chips: <span id="chips">50</span> | Max 200 | Bet Amount: <input type="number" id="bet" value="5" min="1" max="50"> </div>
+<canvas id="wheel" width="500" height="500"></canvas>
+<div id="controls">
+  <button id="spin">SPIN</button>
+  <button id="reset">RESET</button>
+</div>
+<div id="history">History:</div>
+
+<script>
+const canvas = document.getElementById('wheel');
+const ctx = canvas.getContext('2d');
+const width = canvas.width, height = canvas.height, radius = width/2 - 20;
+const slots = 18*2; // 18 red, 18 black
+let angleOffset = 0;
+let ballAngle = 0, spinning = false;
+const STORAGE_KEY='redblack.roulette.v1';
+let chips = 50;
+let history = [];
+
+// Load storage
+try{
+  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+  chips = stored?.chips || 50;
+  history = stored?.history || [];
+} catch{}
+document.getElementById('chips').innerText=chips;
+
+// Draw wheel
+function drawWheel(){
+  ctx.clearRect(0,0,width,height);
+  const center = {x:width/2, y:height/2};
+  for(let i=0;i<slots;i++){
+    const start = (i*(2*Math.PI/slots)) + angleOffset;
+    const end = ((i+1)*(2*Math.PI/slots)) + angleOffset;
+    ctx.beginPath();
+    ctx.moveTo(center.x,center.y);
+    ctx.arc(center.x,center.y,radius,start,end);
+    ctx.fillStyle = i%2===0?'#ff4d4d':'#222'; // red/black
+    ctx.fill();
+    ctx.strokeStyle='#111'; ctx.stroke();
+  }
+  // Ball
+  const ballR=12;
+  const ballX = center.x + Math.cos(ballAngle+angleOffset)*(radius-30);
+  const ballY = center.y + Math.sin(ballAngle+angleOffset)*(radius-30);
+  const grad = ctx.createRadialGradient(ballX,ballY,2,ballX,ballY,ballR);
+  grad.addColorStop(0,'#fff2b2'); grad.addColorStop(0.5,'#ffd66b'); grad.addColorStop(1,'#ff8c00');
+  ctx.fillStyle=grad;
+  ctx.beginPath(); ctx.arc(ballX,ballY,ballR,0,Math.PI*2); ctx.fill();
+  // Center circle
+  ctx.beginPath(); ctx.arc(center.x,center.y,20,0,Math.PI*2); ctx.fillStyle='#071021'; ctx.fill();
+}
+
+// Update history display
+function updateHistory(){
+  const hEl=document.getElementById('history');
+  hEl.innerHTML='History:<br>';
+  history.slice(0,10).forEach(h=>{ hEl.innerHTML+=`[${h.color}] Bet:${h.bet} → ${h.win?'+':''}${h.result}<br>`;});
+}
+
+// Spin logic
+document.getElementById('spin').addEventListener('click', ()=>{
+  if(spinning) return;
+  let betAmt = parseInt(document.getElementById('bet').value)||0;
+  if(betAmt>chips) betAmt=chips;
+  if(betAmt<=0) return;
+  const guess = Math.random()<0.5?'red':'black';
+  chips-=betAmt; document.getElementById('chips').innerText=chips;
+
+  let spinDur = 2000 + Math.random()*1000;
+  const start = performance.now();
+  const startOffset = angleOffset;
+  const ballStart = Math.random()*2*Math.PI;
+  spinning=true;
+
+  function animate(now){
+    const t=(now-start)/spinDur;
+    const ease = 1 - Math.pow(1-t,3);
+    angleOffset = startOffset + ease*10; // multiple spins
+    ballAngle = ballStart + ease*15*(Math.random()*0.2+0.9); // ball rotates differently
+    drawWheel();
+    if(t<1) requestAnimationFrame(animate);
+    else finish();
+  }
+
+  function finish(){
+    // determine landing slot
+    const finalAngle = (ballAngle+angleOffset)%(2*Math.PI);
+    const slotIndex = Math.floor(finalAngle/(2*Math.PI/slots));
+    const color = slotIndex%2===0?'red':'black';
+    const win = (color===guess);
+    const result = win?betAmt*2:0;
+    if(win) chips += result;
+    if(chips>=200) { chips=200; document.getElementById('spin').disabled=true; }
+    if(chips<=0) { chips=0; document.getElementById('spin').disabled=true; }
+    document.getElementById('chips').innerText=chips;
+    history.unshift({color,bet:betAmt,win,result}); history=history.slice(0,200);
+    updateHistory();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({chips,history}));
+    spinning=false;
+  }
+
+  requestAnimationFrame(animate);
+});
+
+// Reset
+document.getElementById('reset').addEventListener('click',()=>{
+  chips=50; history=[]; spinning=false;
+  document.getElementById('chips').innerText=chips;
+  document.getElementById('spin').disabled=false;
+  localStorage.removeItem(STORAGE_KEY);
+  updateHistory();
+});
+
+// Initial draw
+drawWheel();
+updateHistory();
+</script>
+
+</body>
+</html>
