@@ -41,9 +41,9 @@ Chips: <span id="chips">50</span> | Max 200 | Bet: <input type="number" id="bet"
 const canvas = document.getElementById('wheel');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height, radius = width/2 - 20;
-const slots = 36;
-let angleOffset = 0, ballAngle = 0, spinning = false;
-const STORAGE_KEY='redblack.roulette.v3';
+const slots = 36; // total segments
+let ballAngle = 0, spinning=false;
+const STORAGE_KEY='redblack.roulette.v4';
 let chips = 50, history = [], guessColor = null, lockedUntil = null;
 
 // Load storage
@@ -63,32 +63,24 @@ function updateHistory(){
   });
 }
 
-// Wheel drawing
+// Wheel is static, alternating red/black
 function drawWheel(){
   ctx.clearRect(0,0,width,height);
   const center={x:width/2,y:height/2};
   for(let i=0;i<slots;i++){
-    const start = (i*(2*Math.PI/slots)) + angleOffset;
-    const end = ((i+1)*(2*Math.PI/slots)) + angleOffset;
+    const start = i*(2*Math.PI/slots);
+    const end = (i+1)*(2*Math.PI/slots);
     ctx.beginPath();
     ctx.moveTo(center.x,center.y);
     ctx.arc(center.x,center.y,radius,start,end);
-    // Calculate color based on slot index and selected guess
-    let color;
-    if(guessColor){
-      const redSlots = guessColor==='red'?16:20; // fewer red if chosen
-      color = i < redSlots ? '#ff4d4d' : '#222';
-    } else {
-      color = i%2===0?'#ff4d4d':'#222';
-    }
-    ctx.fillStyle=color;
+    ctx.fillStyle=i%2===0?'#ff4d4d':'#222';
     ctx.fill();
     ctx.strokeStyle='#111'; ctx.stroke();
   }
   // Ball
   const ballR=12;
-  const ballX=center.x+Math.cos(ballAngle+angleOffset)*(radius-30);
-  const ballY=center.y+Math.sin(ballAngle+angleOffset)*(radius-30);
+  const ballX=center.x+Math.cos(ballAngle)*(radius-30);
+  const ballY=center.y+Math.sin(ballAngle)*(radius-30);
   const grad=ctx.createRadialGradient(ballX,ballY,2,ballX,ballY,ballR);
   grad.addColorStop(0,'#fff2b2'); grad.addColorStop(0.5,'#ffd66b'); grad.addColorStop(1,'#ff8c00');
   ctx.fillStyle=grad;
@@ -132,28 +124,33 @@ document.getElementById('spin').addEventListener('click',()=>{
 
   chips -= betAmt; document.getElementById('chips').innerText=chips;
 
-  // Decide ball landing based on guessColor (rarer win)
-  const winChance = Math.random()<0.4; // less than 50% to win
-  const finalColor = winChance? guessColor : (guessColor==='red'?'black':'red');
+  // Decide ball landing
+  const winChance=0.35; // less than 50%
+  const willWin=Math.random()<winChance;
+  const finalColor=willWin?guessColor:(guessColor==='red'?'black':'red');
 
-  const spinDur=3000+Math.random()*1000;
+  // Map finalColor to segment
+  const redSlots=18, blackSlots=18;
+  let targetSlot;
+  if(finalColor==='red') targetSlot=Math.floor(Math.random()*redSlots)*2;
+  else targetSlot=Math.floor(Math.random()*blackSlots)*2+1;
+
+  const spinDur=4000+Math.random()*2000;
   const start=performance.now();
-  const startOffset=angleOffset;
-  const ballStart=Math.random()*2*Math.PI;
-  spinning=true;
+  const startAngle=ballAngle;
 
+  spinning=true;
   function animate(now){
     const t=(now-start)/spinDur;
-    const ease = 1 - Math.pow(1-t,3);
-    angleOffset=startOffset+ease*12;
-    ballAngle=ballStart + ease*20*(Math.random()*0.3+0.85);
+    const ease=1 - Math.pow(1-t,3);
+    ballAngle=startAngle + ease*(targetSlot*2*Math.PI/slots - startAngle);
     drawWheel();
     if(t<1) requestAnimationFrame(animate);
     else finish();
   }
 
   function finish(){
-    const color = finalColor;
+    const color=finalColor;
     const win=color===guessColor;
     const result=win?betAmt*2:0;
     if(win) chips+=result;
