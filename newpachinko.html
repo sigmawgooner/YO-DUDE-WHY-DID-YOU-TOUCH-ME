@@ -30,13 +30,12 @@
 const canvas=document.getElementById('pachinko');
 const ctx=canvas.getContext('2d');
 const width=canvas.width,height=canvas.height;
-const rows=12,slotCount=rows+1;
-const STORAGE_KEY='pachinko.canvas.session.v9';
+const rows=12,cols=10,slotCount=rows+1;
+const STORAGE_KEY='pachinko.canvas.session.v10';
 const POINT_CAP=200,RESET_INTERVAL=12*60*60*1000;
 
 let displayTotal=0,history=[],ball=null,dropping=false,lastReset=Date.now();
 
-// Load saved data
 try{
   const stored=JSON.parse(localStorage.getItem(STORAGE_KEY));
   if(stored){
@@ -50,18 +49,19 @@ if(history.length) document.getElementById('last').innerText=`Last: ${history[0]
 
 const baseScores=Array.from({length:slotCount},(_,i)=>Math.max(1,50-Math.abs(i-(slotCount-1)/2)*8));
 
-// Pegs
+// Pegs (square grid)
 const pegs=[];
 const margin=24,topY=60,bottomY=height-140;
+const rowSpacing=(bottomY-topY)/rows;
+const colSpacing=(width-margin*2)/cols;
 for(let r=0;r<rows;r++){
-  const count=r+1,rowWidth=width-2*margin,offsetX=(width-rowWidth)/2,stepX=rowWidth/count;
-  for(let c=0;c<count;c++){
-    const x=offsetX+stepX*(c+0.5),y=topY+(r/(rows-1))*(bottomY-topY);
+  for(let c=0;c<cols;c++){
+    const x=margin+c*colSpacing+colSpacing/2;
+    const y=topY+r*rowSpacing;
     pegs.push({x,y,r:7});
   }
 }
 
-// Pre-render static
 const staticCanvas=document.createElement('canvas');
 staticCanvas.width=width; staticCanvas.height=height;
 const staticCtx=staticCanvas.getContext('2d');
@@ -80,7 +80,6 @@ function drawStatic(){
 }
 drawStatic();
 
-// Timer
 function updateTimer(){
   let remaining=RESET_INTERVAL-(Date.now()-lastReset);
   if(remaining<=0){ displayTotal=0; history=[]; lastReset=Date.now(); localStorage.setItem(STORAGE_KEY,JSON.stringify({total:0,history:[],lastReset})); document.getElementById('drop').disabled=false; }
@@ -91,30 +90,15 @@ function updateTimer(){
 }
 updateTimer();
 
-// Audio
 let audioCtx=null;
 function ensureAudio(){ if(!audioCtx) try{ audioCtx=new(window.AudioContext||window.webkitAudioContext)() }catch{} return audioCtx; }
 function plink(f=900,d=0.04){ const ctx=ensureAudio(); if(!ctx)return; const o=ctx.createOscillator(),g=ctx.createGain(); o.type='sine'; o.frequency.value=f*(0.9+Math.random()*0.2); g.gain.value=0.06; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d); o.stop(ctx.currentTime+d+0.01); }
 function plonk(f=220,d=0.18){ const ctx=ensureAudio(); if(!ctx)return; const o=ctx.createOscillator(),g=ctx.createGain(); o.type='triangle'; o.frequency.value=f*(0.95+Math.random()*0.08); g.gain.value=0.12; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d); o.stop(ctx.currentTime+d+0.01); }
 
-// Draw ball
 function drawBall(){ if(!ball)return; const grad=ctx.createRadialGradient(ball.x,ball.y,2,ball.x,ball.y,ball.r); grad.addColorStop(0,'#fff2b2'); grad.addColorStop(0.5,'#ffb347'); grad.addColorStop(1,'#ff8c00'); ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill(); }
-
 function simulatePhysics(dt){ if(!ball) return; const g=900; ball.vy+=g*dt; ball.vx*=Math.pow(0.999,dt*60); ball.vy*=Math.pow(0.999,dt*60); ball.x+=ball.vx*dt; ball.y+=ball.vy*dt; const lb=8,rb=width-8; if(ball.x-ball.r<lb){ ball.x=lb+ball.r; ball.vx=Math.abs(ball.vx)*0.6; ball.vy*=0.9; } if(ball.x+ball.r>rb){ ball.x=rb-ball.r; ball.vx=-Math.abs(ball.vx)*0.6; ball.vy*=0.9; } for(const p of pegs){ const dx=ball.x-p.x,dy=ball.y-p.y,dist=Math.sqrt(dx*dx+dy*dy),minD=ball.r+p.r; if(dist<minD&&dist>0){ const nx=dx/dist,ny=dy/dist,rel=ball.vx*nx+ball.vy*ny; ball.vx-=(1.8*rel)*nx; ball.vy-=(1.8*rel)*ny; ball.vx+=(Math.random()-0.5)*20; const overlap=minD-dist+0.5; ball.x+=nx*overlap; ball.y+=ny*overlap; plink(800-(p.y/height)*300,0.03); } } const st=height-120; if(ball.y+ball.r>=st){ const idx=Math.min(slotCount-1,Math.max(0,Math.floor(ball.x/(width/slotCount)))); ball.x=idx*(width/slotCount)+(width/slotCount)/2; ball.y=height-60; ball.vx=0; ball.vy=0; ball.restingSlot=idx; dropping=false; plonk(200+Math.random()*60,0.24); setTimeout(()=>revealScore(idx),750); } }
-
-function revealScore(idx){ const pts=baseScores[idx]||0,start=displayTotal,end=Math.min(POINT_CAP,start+pts),dur=900,t0=performance.now(); function tick(now){ const p=Math.min(1,(now-t0)/dur); displayTotal=Math.floor(start+(end-start)*(1-Math.pow(1-p,2))); document.getElementById('total').innerText=displayTotal; if(p<1) requestAnimationFrame(tick); else{ history.unshift({slot:idx,points:pts,ts:new Date().toISOString()}); history=history.slice(0,200); document.getElementById('last').innerText=`Last: ${pts}pts (slot ${idx})`; localStorage.setItem(STORAGE_KEY,JSON.stringify({total:displayTotal,history,lastReset})); if(displayTotal>=POINT_CAP) document.getElementById('drop').disabled=true; } }
-  requestAnimationFrame(tick);
-}
-
+function revealScore(idx){ const pts=baseScores[idx]||0,start=displayTotal,end=Math.min(POINT_CAP,start+pts),dur=900,t0=performance.now(); function tick(now){ const p=Math.min(1,(now-t0)/dur); displayTotal=Math.floor(start+(end-start)*(1-Math.pow(1-p,2))); document.getElementById('total').innerText=displayTotal; if(p<1) requestAnimationFrame(tick); else{ history.unshift({slot:idx,points:pts,ts:new Date().toISOString()}); history=history.slice(0,200); document.getElementById('last').innerText=`Last: ${pts}pts (slot ${idx})`; localStorage.setItem(STORAGE_KEY,JSON.stringify({total:displayTotal,history,lastReset})); if(displayTotal>=POINT_CAP) document.getElementById('drop').disabled=true; } } requestAnimationFrame(tick); }
 function render(){ ctx.drawImage(staticCanvas,0,0); drawBall(); if(dropping) requestAnimationFrame(render); }
-
 document.getElementById('drop').addEventListener('click',()=>{ if(dropping||displayTotal>=POINT_CAP) return; ball={x:width/2,y:28,vx:(Math.random()-0.5)*6,vy:0,r:10,restingSlot:null}; dropping=true; ensureAudio(); const last={t:performance.now()}; function step(now){ const dt=Math.min(32,now-last.t)/1000; last.t=now; simulatePhysics(dt); render(); if(dropping) requestAnimationFrame(step); } requestAnimationFrame(step); });
-
-// Reset points
 document.getElementById('reset').addEventListener('click',()=>{ displayTotal=0; history=[]; ball=null; dropping=false; lastReset=Date.now(); localStorage.removeItem(STORAGE_KEY); document.getElementById('total').innerText=displayTotal; document.getElementById('last').innerText='Last: —'; document.getElementById('drop').disabled=false; drawStatic(); ctx.drawImage(staticCanvas,0,0); });
-
-ctx.drawImage(staticCanvas,0,0);
-if(history.length&&history[0].slot!=null){ ball={x:history[0].slot*(width/slotCount)+(width/slotCount)/2,y:height-60,r:10,restingSlot:history[0].slot}; drawBall(); }
-</script>
-</body>
-</html>
+ctx.draw
