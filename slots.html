@@ -83,10 +83,11 @@ body {
   color:#fff;
   font-weight:800;
   user-select:none;
-  transition:0.2s;
   text-align:center;
   line-height:120px;
   font-size:24px;
+  touch-action:none;
+  transition: transform 0.1s ease;
 }
 #info {
   margin-top:12px;
@@ -125,7 +126,7 @@ body {
 <div id="jackpot">Jackpot: <span id="jackpotVal">100</span></div>
 
 <script>
-const STORAGE_KEY='slot.machine.v4';
+const STORAGE_KEY='slot.machine.v5';
 let points=100,jackpot=100,lockedUntil=0,spinning=false;
 const symbols=['🍒','🍋','🍊','⭐','💎','7️⃣'];
 const reels=[document.getElementById('reel0'),document.getElementById('reel1'),document.getElementById('reel2')];
@@ -188,19 +189,46 @@ function spinReel(reel){
       pos=(pos+1)%totalSymbols;
       playSound(400+(pos*40),0.05);
       count++;
-      if(count>=spins){ clearInterval(interval); resolve(symbols[pos]); }
+      if(count>=spins){ clearInterval(interval); bounceReel(reel); resolve(symbols[pos]); }
     }, stepTime);
   });
 }
 
-// === LEVER PULL ===
-document.getElementById('lever').addEventListener('mousedown', async ()=>{
+function bounceReel(reel){
+  reel.style.transition='transform 0.2s';
+  reel.style.transform='translateY(-10px)';
+  setTimeout(()=>{ reel.style.transform='translateY(0)'; },200);
+}
+
+// === LEVER DRAG ===
+const lever=document.getElementById('lever');
+let dragging=false,startY=0;
+lever.addEventListener('pointerdown',e=>{
+  if(spinning) return;
+  dragging=true;
+  startY=e.clientY;
+  lever.setPointerCapture(e.pointerId);
+});
+lever.addEventListener('pointermove',e=>{
+  if(!dragging) return;
+  let deltaY=e.clientY-startY;
+  if(deltaY>80) deltaY=80;
+  if(deltaY<0) deltaY=0;
+  lever.style.transform=`translateY(${deltaY}px) rotate(${deltaY/4}deg)`;
+});
+lever.addEventListener('pointerup',async e=>{
+  if(!dragging) return;
+  dragging=false;
+  lever.style.transform='translateY(0px) rotate(0deg)';
+  startSpin();
+});
+
+// === START SPIN ===
+async function startSpin(){
   if(spinning) return;
   if(points<25) return;
   points-=25; updateDisplay();
   spinning=true;
-  document.getElementById('lever').style.transform='translateY(80px) rotate(15deg)';
-  setTimeout(()=>document.getElementById('lever').style.transform='translateY(0px) rotate(0deg)',200);
 
   const results=[];
   for(let i=0;i<3;i++) results.push(await spinReel(reels[i]));
@@ -224,7 +252,7 @@ document.getElementById('lever').addEventListener('mousedown', async ()=>{
   updateDisplay();
   saveState();
   spinning=false;
-});
+}
 
 function flashReels(){
   reels.forEach(r=>r.classList.add('flash'));
