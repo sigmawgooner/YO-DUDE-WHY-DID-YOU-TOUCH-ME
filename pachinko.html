@@ -7,7 +7,7 @@
 <style>
   body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; color:#fff; font-family:monospace; }
   #container { text-align:center; }
-  canvas { border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,0.6); display:block; margin:auto; }
+  canvas { border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,0.7); display:block; margin:auto; background:#071021; }
   button { padding:8px 14px; border-radius:8px; font-weight:800; margin:0 4px; cursor:pointer; }
   #drop { background:#0f766e; color:#fff; }
   #reset { background:#2b2b2b; color:#fff; }
@@ -30,7 +30,7 @@ const canvas = document.getElementById('pachinko');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height;
 const rows = 12, slotCount = rows + 1;
-const STORAGE_KEY = 'pachinko.canvas.session.v7';
+const STORAGE_KEY = 'pachinko.canvas.session.v8';
 const POINT_CAP = 200;
 
 let displayTotal = 0, history = [], ball = null, dropping = false;
@@ -62,30 +62,59 @@ for(let r=0;r<pegRows;r++){
   }
 }
 
+// Pre-render static canvas for pegs & slots
+const staticCanvas = document.createElement('canvas');
+staticCanvas.width = width; staticCanvas.height = height;
+const staticCtx = staticCanvas.getContext('2d');
+
+function drawStatic(){
+  // Gradient background
+  const grad = staticCtx.createLinearGradient(0,0,0,height);
+  grad.addColorStop(0,'#071021');
+  grad.addColorStop(1,'#0c1223');
+  staticCtx.fillStyle = grad;
+  staticCtx.fillRect(0,0,width,height);
+
+  // Glowy pegs
+  for(const p of pegs){
+    staticCtx.beginPath();
+    staticCtx.fillStyle = '#e6e6ff';
+    staticCtx.shadowColor = '#7fffd4';
+    staticCtx.shadowBlur = 8;
+    staticCtx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    staticCtx.fill();
+  }
+  staticCtx.shadowBlur = 0;
+
+  // Slots
+  const slotTop=height-120, slotH=96, slotW=width/slotCount;
+  staticCtx.fillStyle="#111"; staticCtx.fillRect(0,slotTop,width,slotH);
+  staticCtx.strokeStyle="#2b2b2b";
+  for(let i=0;i<slotCount;i++){
+    staticCtx.strokeRect(i*slotW+6,slotTop+6,slotW-12,slotH-12);
+    staticCtx.fillStyle="#cfcfcf"; staticCtx.font="bold 14px monospace"; staticCtx.textAlign="center"; staticCtx.fillText(i,i*slotW+slotW/2,slotTop+28);
+    staticCtx.fillStyle="#ffd66b"; staticCtx.font="bold 18px monospace"; staticCtx.fillText(baseScores[i],i*slotW+slotW/2,slotTop+58);
+  }
+}
+drawStatic();
+
 // Audio
 let audioCtx = null;
 function ensureAudio(){ if(!audioCtx) try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch{}; return audioCtx; }
 function plink(f=900,d=0.04){ const ctx=ensureAudio(); if(!ctx)return; const o=ctx.createOscillator(),g=ctx.createGain(); o.type='sine'; o.frequency.value=f*(0.9+Math.random()*0.2); g.gain.value=0.06; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d); o.stop(ctx.currentTime+d+0.01);}
 function plonk(f=220,d=0.18){ const ctx=ensureAudio(); if(!ctx)return; const o=ctx.createOscillator(),g=ctx.createGain(); o.type='triangle'; o.frequency.value=f*(0.95+Math.random()*0.08); g.gain.value=0.12; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d); o.stop(ctx.currentTime+d+0.01);}
 
-// Draw functions
-function drawStatic(){
-  ctx.fillStyle="#071021"; ctx.fillRect(0,0,width,height);
-  for(const p of pegs){ ctx.beginPath(); ctx.fillStyle="#DDD"; ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();}
-  const slotTop=height-120, slotH=96, slotW=width/slotCount;
-  ctx.fillStyle="#111"; ctx.fillRect(0,slotTop,width,slotH);
-  ctx.strokeStyle="#2b2b2b";
-  for(let i=0;i<slotCount;i++){
-    ctx.strokeRect(i*slotW+6,slotTop+6,slotW-12,slotH-12);
-    ctx.fillStyle="#cfcfcf"; ctx.font="bold 14px monospace"; ctx.textAlign="center"; ctx.fillText(i,i*slotW+slotW/2,slotTop+28);
-    ctx.fillStyle="#ffd66b"; ctx.font="bold 18px monospace"; ctx.fillText(baseScores[i],i*slotW+slotW/2,slotTop+58);
-  }
-}
-
 // Draw ball
 function drawBall(){
   if(!ball) return;
-  ctx.beginPath(); ctx.fillStyle="#ffb347"; ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
+  const grad = ctx.createRadialGradient(ball.x,ball.y,2,ball.x,ball.y,ball.r);
+  grad.addColorStop(0,'#fff2b2');
+  grad.addColorStop(0.5,'#ffb347');
+  grad.addColorStop(1,'#ff8c00');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+  ctx.fill();
 }
 
 // Physics
@@ -112,7 +141,7 @@ function simulatePhysics(dt){
   }
 }
 
-// Reveal score with cap
+// Reveal score with 200-point cap
 function revealScore(idx){
   const pts = baseScores[idx]||0;
   const start = displayTotal;
@@ -128,32 +157,28 @@ function revealScore(idx){
       history=history.slice(0,200);
       document.getElementById('last').innerText = `Last: ${pts}pts (slot ${idx})`;
       localStorage.setItem(STORAGE_KEY, JSON.stringify({total:displayTotal,history}));
-      drawStatic();
-      drawBall();
-      if(displayTotal >= POINT_CAP) document.getElementById('drop').disabled = true;
+      if(displayTotal>=POINT_CAP) document.getElementById('drop').disabled=true;
     }
   }
   requestAnimationFrame(tick);
 }
 
-// Render loop
+// Render
 function render(){
-  drawStatic();
+  ctx.drawImage(staticCanvas,0,0); // draw pre-rendered static
   drawBall();
   if(dropping) requestAnimationFrame(render);
 }
 
-// Start drop
+// Drop button
 document.getElementById('drop').addEventListener('click', ()=>{
-  if(dropping || displayTotal >= POINT_CAP) return;
+  if(dropping || displayTotal>=POINT_CAP) return;
   ball={x:width/2, y:28, vx:(Math.random()-0.5)*6, vy:0, r:10, restingSlot:null};
-  dropping=true;
-  ensureAudio();
+  dropping=true; ensureAudio();
   const last={t:performance.now()};
   function step(now){
     const dt=Math.min(32,now-last.t)/1000; last.t=now;
-    simulatePhysics(dt);
-    render();
+    simulatePhysics(dt); render();
     if(dropping) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -165,12 +190,13 @@ document.getElementById('reset').addEventListener('click', ()=>{
   localStorage.removeItem(STORAGE_KEY);
   document.getElementById('total').innerText=displayTotal;
   document.getElementById('last').innerText='Last: —';
-  document.getElementById('drop').disabled = false;
+  document.getElementById('drop').disabled=false;
   drawStatic();
+  ctx.drawImage(staticCanvas,0,0);
 });
 
 // Initial draw
-drawStatic();
+ctx.drawImage(staticCanvas,0,0);
 if(history.length && history[0].slot!=null){
   ball={x:history[0].slot*(width/slotCount)+(width/slotCount)/2, y:height-60, r:10, restingSlot:history[0].slot};
   drawBall();
