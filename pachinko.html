@@ -30,15 +30,22 @@ const canvas = document.getElementById('pachinko');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height;
 const rows = 12, slotCount = rows + 1;
-let displayTotal = 0, history = [];
-const STORAGE_KEY = 'pachinko.canvas.session.v5';
-let ball = null, dropping = false;
+const STORAGE_KEY = 'pachinko.canvas.session.v6';
+
+let displayTotal = 0, history = [], ball = null, dropping = false;
+
+// Load saved data
+try { 
+  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+  displayTotal = stored?.total || 0; 
+  history = stored?.history || [];
+} catch{}
+
+document.getElementById('total').innerText = displayTotal;
+if(history.length) document.getElementById('last').innerText = `Last: ${history[0].points}pts (slot ${history[0].slot})`;
 
 // Initialize base scores
 const baseScores = Array.from({ length: slotCount }, (_, i) => Math.max(1, 50 - Math.abs(i - (slotCount-1)/2)*8));
-
-// Load previous data
-try { const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)); displayTotal = stored?.total||0; history = stored?.history||[]; } catch{}
 
 // Pegs: staggered grid
 const pegs = [];
@@ -75,6 +82,7 @@ function drawStatic(){
   }
 }
 
+// Draw ball
 function drawBall(){
   if(!ball) return;
   ctx.beginPath(); ctx.fillStyle="#ffb347"; ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
@@ -104,6 +112,7 @@ function simulatePhysics(dt){
   }
 }
 
+// Reveal score and save
 function revealScore(idx){
   const pts=baseScores[idx]||0;
   const start=displayTotal, end=start+pts;
@@ -114,9 +123,12 @@ function revealScore(idx){
     document.getElementById('total').innerText=displayTotal;
     if(p<1) requestAnimationFrame(tick);
     else {
-      history.unshift({slot:idx,points:pts,ts:new Date().toISOString()}); history=history.slice(0,200);
+      history.unshift({slot:idx,points:pts,ts:new Date().toISOString()});
+      history=history.slice(0,200);
       document.getElementById('last').innerText=`Last: ${pts}pts (slot ${idx})`;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({total:end,history}));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({total:displayTotal,history}));
+      drawStatic();
+      drawBall();
     }
   }
   requestAnimationFrame(tick);
@@ -124,7 +136,9 @@ function revealScore(idx){
 
 // Render loop
 function render(){
-  drawStatic(); drawBall(); if(dropping) requestAnimationFrame(render);
+  drawStatic();
+  drawBall();
+  if(dropping) requestAnimationFrame(render);
 }
 
 // Start drop
@@ -136,7 +150,8 @@ document.getElementById('drop').addEventListener('click', ()=>{
   const last={t:performance.now()};
   function step(now){
     const dt=Math.min(32,now-last.t)/1000; last.t=now;
-    simulatePhysics(dt); render();
+    simulatePhysics(dt);
+    render();
     if(dropping) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -153,7 +168,10 @@ document.getElementById('reset').addEventListener('click', ()=>{
 
 // Initial draw
 drawStatic();
-if(history.length && history[0].slot!=null) drawBall();
+if(history.length && history[0].slot!=null){
+  ball={x:history[0].slot*(width/slotCount)+(width/slotCount)/2, y:height-60, r:10, restingSlot:history[0].slot};
+  drawBall();
+}
 </script>
 </body>
 </html>
