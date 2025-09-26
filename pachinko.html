@@ -15,7 +15,7 @@
 </head>
 <body>
 <div id="container">
-  <div style="color:#ffd66b; font-weight:800; margin-bottom:8px;">Total Points (Max 200)</div>
+  <div style="color:#ffd66b; font-weight:800; margin-bottom:8px;">Total Points (Max 500)</div>
   <div id="total" style="font-size:28px; margin-bottom:12px;">0</div>
   <canvas id="pachinko" width="640" height="840"></canvas>
   <div style="margin-top:12px;">
@@ -25,64 +25,22 @@
   <div id="last" style="color:#9aa6b2; margin-top:10px; font-size:13px;">Last: —</div>
 </div>
 
+<script src="pointsManager.js"></script>
 <script>
 const canvas = document.getElementById('pachinko');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height;
 const rows = 12, slotCount = rows + 1;
-const STORAGE_KEY = 'pachinko.canvas.session.v8';
-const POINT_CAP = 200;
-const RESET_INTERVAL = 12*60*60*1000; // 12 hours
+const POINT_CAP = 500;
 
-let displayTotal = 0, history = [], ball = null, dropping = false, lastReset = Date.now();
+let displayTotal = PointsManager.getPoints();
+let history = [];
+let ball = null, dropping = false;
 
-// Load saved data
-try { 
-  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-  if(stored){
-    const elapsed = Date.now() - (stored.lastReset || Date.now());
-    if(elapsed >= RESET_INTERVAL){
-      displayTotal = 0;
-      history = [];
-      lastReset = Date.now();
-    } else {
-      displayTotal = stored.total || 0;
-      history = stored.history || [];
-      lastReset = stored.lastReset || Date.now();
-    }
-  }
-} catch{}
-document.getElementById('total').innerText = displayTotal;
-if(history.length) document.getElementById('last').innerText = `Last: ${history[0].points}pts (slot ${history[0].slot})`;
+// Update displayed points immediately
+PointsManager.displayPoints('total');
 
-// Timer for 12-hour reset
-const timerEl = document.createElement('div');
-timerEl.style.position='absolute';
-timerEl.style.top='12px';
-timerEl.style.left='12px';
-timerEl.style.color='#ffd66b';
-timerEl.style.fontWeight='bold';
-timerEl.style.fontFamily='monospace';
-document.body.appendChild(timerEl);
-
-function updateTimer(){
-  const remaining = Math.max(0, RESET_INTERVAL - (Date.now() - lastReset));
-  const hrs = Math.floor(remaining / 3600000);
-  const mins = Math.floor((remaining % 3600000)/60000);
-  const secs = Math.floor((remaining % 60000)/1000);
-  timerEl.innerText = `Reset in ${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-  if(remaining <= 0){
-    displayTotal = 0;
-    history = [];
-    lastReset = Date.now();
-    localStorage.removeItem(STORAGE_KEY);
-    document.getElementById('total').innerText = displayTotal;
-    document.getElementById('last').innerText = 'Last: —';
-    document.getElementById('drop').disabled = false;
-  }
-}
-setInterval(updateTimer, 1000);
-updateTimer();
+document.getElementById('last').innerText = 'Last: —';
 
 // Initialize base scores
 const baseScores = Array.from({ length: slotCount }, (_, i) => Math.max(1, 50 - Math.abs(i - (slotCount-1)/2)*8));
@@ -108,14 +66,12 @@ staticCanvas.width = width; staticCanvas.height = height;
 const staticCtx = staticCanvas.getContext('2d');
 
 function drawStatic(){
-  // Gradient background
   const grad = staticCtx.createLinearGradient(0,0,0,height);
   grad.addColorStop(0,'#071021');
   grad.addColorStop(1,'#0c1223');
   staticCtx.fillStyle = grad;
   staticCtx.fillRect(0,0,width,height);
 
-  // Glowy pegs
   for(const p of pegs){
     staticCtx.beginPath();
     staticCtx.fillStyle = '#e6e6ff';
@@ -126,14 +82,15 @@ function drawStatic(){
   }
   staticCtx.shadowBlur = 0;
 
-  // Slots
   const slotTop=height-120, slotH=96, slotW=width/slotCount;
   staticCtx.fillStyle="#111"; staticCtx.fillRect(0,slotTop,width,slotH);
   staticCtx.strokeStyle="#2b2b2b";
   for(let i=0;i<slotCount;i++){
     staticCtx.strokeRect(i*slotW+6,slotTop+6,slotW-12,slotH-12);
-    staticCtx.fillStyle="#cfcfcf"; staticCtx.font="bold 14px monospace"; staticCtx.textAlign="center"; staticCtx.fillText(i,i*slotW+slotW/2,slotTop+28);
-    staticCtx.fillStyle="#ffd66b"; staticCtx.font="bold 18px monospace"; staticCtx.fillText(baseScores[i],i*slotW+slotW/2,slotTop+58);
+    staticCtx.fillStyle="#cfcfcf"; staticCtx.font="bold 14px monospace"; staticCtx.textAlign="center"; 
+    staticCtx.fillText(i,i*slotW+slotW/2,slotTop+28);
+    staticCtx.fillStyle="#ffd66b"; staticCtx.font="bold 18px monospace"; 
+    staticCtx.fillText(baseScores[i],i*slotW+slotW/2,slotTop+58);
   }
 }
 drawStatic();
@@ -181,31 +138,21 @@ function simulatePhysics(dt){
   }
 }
 
-// Reveal score with 200-point cap
+// Reveal score
 function revealScore(idx){
   const pts = baseScores[idx]||0;
-  const start = displayTotal;
-  const end = Math.min(POINT_CAP, start + pts);
-  const dur = 900, t0 = performance.now();
-  function tick(now){
-    const p = Math.min(1,(now-t0)/dur);
-    displayTotal = Math.floor(start + (end-start)*(1-Math.pow(1-p,2)));
-    document.getElementById('total').innerText = displayTotal;
-    if(p<1) requestAnimationFrame(tick);
-    else {
-      history.unshift({slot:idx, points:pts, ts:new Date().toISOString()});
-      history=history.slice(0,200);
-      document.getElementById('last').innerText = `Last: ${pts}pts (slot ${idx})`;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({total:displayTotal,history,lastReset}));
-      if(displayTotal>=POINT_CAP) document.getElementById('drop').disabled=true;
-    }
-  }
-  requestAnimationFrame(tick);
+  const newTotal = Math.min(POINT_CAP, PointsManager.getPoints() + pts);
+  PointsManager.addPoints(pts);
+  displayTotal = newTotal;
+  document.getElementById('total').innerText = displayTotal;
+  history.unshift({slot:idx, points:pts, ts:new Date().toISOString()});
+  document.getElementById('last').innerText = `Last: ${pts}pts (slot ${idx})`;
+  if(displayTotal>=POINT_CAP) document.getElementById('drop').disabled=true;
 }
 
 // Render
 function render(){
-  ctx.drawImage(staticCanvas,0,0); // draw pre-rendered static
+  ctx.drawImage(staticCanvas,0,0);
   drawBall();
   if(dropping) requestAnimationFrame(render);
 }
@@ -226,9 +173,11 @@ document.getElementById('drop').addEventListener('click', ()=>{
 
 // Reset points
 document.getElementById('reset').addEventListener('click', ()=>{
-  displayTotal=0; history=[]; ball=null; dropping=false;
-  lastReset = Date.now();
-  localStorage.removeItem(STORAGE_KEY);
+  PointsManager.resetPoints();
+  displayTotal = 0;
+  history=[];
+  ball=null;
+  dropping=false;
   document.getElementById('total').innerText=displayTotal;
   document.getElementById('last').innerText='Last: —';
   document.getElementById('drop').disabled=false;
@@ -238,10 +187,6 @@ document.getElementById('reset').addEventListener('click', ()=>{
 
 // Initial draw
 ctx.drawImage(staticCanvas,0,0);
-if(history.length && history[0].slot!=null){
-  ball={x:history[0].slot*(width/slotCount)+(width/slotCount)/2, y:height-60, r:10, restingSlot:history[0].slot};
-  drawBall();
-}
 </script>
 </body>
 </html>
