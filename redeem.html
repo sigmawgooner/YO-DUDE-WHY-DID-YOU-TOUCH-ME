@@ -1,53 +1,82 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>GambleHub Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gamblecore Rewards</title>
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    // Firebase imports
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
 
+    // Firebase config (yours)
     const firebaseConfig = {
       apiKey: "AIzaSyDNF80md5t0mBPJdWngl5fIV4Rjp0FfqQA",
       authDomain: "gamblecore-59b61.firebaseapp.com",
       projectId: "gamblecore-59b61",
+      storageBucket: "gamblecore-59b61.firebasestorage.app",
+      messagingSenderId: "385728667065",
+      appId: "1:385728667065:web:ab2570a02a85c34534ea68",
+      measurementId: "G-NTH9YFRRN0"
     };
 
+    // Init Firebase
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const provider = new GoogleAuthProvider();
 
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxSvIg79EQcYJqru3SjkGBIDofI3XghErzgD6xyzc3eW-oZk9PYy7IqD_YO1ay2I8hz/exec";
+    // Your Google Apps Script URL
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxSvIg79EQcYJqru3SjkGBIDofI3XghErzgD6xyzc3eW-oZk9PYy7IqD_YO1ay2I8hz/exec";
 
+    // Sign in with Google
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("loginBtn").addEventListener("click", () => {
+        signInWithPopup(auth, provider)
+          .then((result) => {
+            console.log("Logged in:", result.user);
+          })
+          .catch((error) => {
+            console.error("Login error:", error);
+          });
+      });
 
-    async function signIn() {
-      try {
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-        document.getElementById("status").textContent = `Signed in as ${user.email}`;
+      document.getElementById("logoutBtn").addEventListener("click", () => {
+        signOut(auth);
+      });
 
-        // Example: add 10 points
-        await fetch(SCRIPT_URL, {
-          method: "POST",
-          body: JSON.stringify({
-            email: user.email,
-            name: user.displayName,
-            points: 10,
-            bought: ""
-          }),
-          headers: { "Content-Type": "application/json" }
-        });
-      } catch (err) {
-        console.error(err);
-      }
-    }
+      // Watch auth state
+      onAuthStateChanged(auth, (user) => {
+        const status = document.getElementById("status");
+        if (user) {
+          status.textContent = `Logged in as ${user.displayName} (${user.email})`;
 
-    window.signIn = signIn;
+          // Send to Google Sheets
+          fetch(SCRIPT_URL, {
+            method: "POST",
+            mode: "no-cors", // Required for Apps Script
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              action: "registerUser",
+              email: user.email,
+              name: user.displayName
+            }),
+          })
+          .then(() => console.log("Sent to Google Sheets"))
+          .catch(err => console.error("Error sending to Sheets:", err));
+
+        } else {
+          status.textContent = "Not logged in";
+        }
+      });
+    });
   </script>
 </head>
-<body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding:40px">
-  <h1>GambleHub Test</h1>
-  <button onclick="signIn()" style="padding:10px 20px;font-size:16px">Sign in with Google</button>
-  <p id="status"></p>
+<body style="font-family: sans-serif; background: #0c1223; color: white; text-align: center; padding: 40px;">
+  <h1>🎰 Gamblecore Rewards</h1>
+  <p id="status">Not logged in</p>
+  <button id="loginBtn">Login with Google</button>
+  <button id="logoutBtn">Logout</button>
 </body>
 </html>
