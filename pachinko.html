@@ -5,165 +5,225 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pachinko Simulator</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap');
   body {
-    margin:0; padding:0; font-family:'Montserrat',sans-serif;
-    display:flex; flex-direction:column; justify-content:center; align-items:center;
-    background: linear-gradient(135deg, #071021 0%, #0c1223 100%);
-    color:#fff; height:100vh;
+    margin: 0;
+    background: #071021;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: monospace;
+    color: #fff;
+    overflow: hidden;
+  }
+  #container {
+    text-align: center;
   }
   canvas {
-    background:#0b101e; border-radius:16px;
-    box-shadow:0 20px 50px rgba(0,0,0,0.7);
-  }
-  #controls {
-    margin-top:20px; display:flex; gap:12px;
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+    background: linear-gradient(to bottom, #071021, #0c1223);
   }
   button {
-    padding:12px 24px; border:none; border-radius:10px;
-    font-weight:700; cursor:pointer; background:#ff4d4d; color:#fff;
-    transition:0.2s all;
+    margin: 8px 4px;
+    padding: 10px 16px;
+    font-weight: 800;
+    border-radius: 8px;
+    cursor: pointer;
   }
-  button:hover { background:#e63946; }
-  #total { margin-top:15px; font-size:1.5rem; color:#ffd66b; }
-  #timer, #last { margin-top:5px; font-size:1rem; color:#9aa6b2; }
+  #drop { background:#0f766e; color:#fff; }
+  #reset { background:#2b2b2b; color:#fff; }
 </style>
 </head>
 <body>
-
-<canvas id="pachinko" width="480" height="720"></canvas>
-<div id="controls">
-  <button id="drop">DROP BALL</button>
-  <button id="reset">RESET POINTS</button>
+<div id="container">
+  <h2>Total Points (Dynamic Cap)</h2>
+  <div id="total" style="font-size:28px; margin-bottom:12px;">0</div>
+  <canvas id="pachinko" width="360" height="540"></canvas>
+  <div style="margin-top:12px;">
+    <button id="drop">DROP</button>
+    <button id="reset">RESET</button>
+  </div>
+  <div id="last" style="color:#9aa6b2; margin-top:10px; font-size:14px;">Last: —</div>
+  <div id="timer" style="margin-top:8px; font-size:13px; color:#ffd66b;"></div>
 </div>
-<div id="total">Total Points: 0</div>
-<div id="timer">Next reset in: 01:00:00</div>
-<div id="last">Last: —</div>
 
 <script>
-const STORAGE_KEY='pachinko.session.v2';
-const CAP_INTERVAL=60*60*1000; // 1 hour
-const BASE_CAP=500;
-const canvas=document.getElementById('pachinko');
-const ctx=canvas.getContext('2d');
-const width=canvas.width, height=canvas.height;
-let total=0, capMultiplier=1, lastReset=Date.now(), history=[], ball=null, dropping=false;
+const canvas = document.getElementById('pachinko');
+const ctx = canvas.getContext('2d');
+const width = canvas.width, height = canvas.height;
 
-// Load saved
-try{
-  const saved=JSON.parse(localStorage.getItem(STORAGE_KEY));
-  if(saved){
-    const elapsed=Date.now()-saved.lastReset;
-    total=saved.total||0;
-    capMultiplier=saved.capMultiplier||1;
-    history=saved.history||[];
-    lastReset=saved.lastReset||Date.now();
-    if(elapsed>=CAP_INTERVAL){ total=0; capMultiplier=1; history=[]; lastReset=Date.now(); }
-  }
-}catch{}
-document.getElementById('total').innerText=`Total Points: ${total}`;
-if(history.length) document.getElementById('last').innerText=`Last: ${history[0].points}pts (slot ${history[0].slot})`;
+// POINT SYSTEM
+let totalPoints = 0;
+let capMultiplier = 1; // 500, 1000, 1500, ...
+let lastDrop = null;
+const STORAGE_KEY = 'pachinkoPointsV2';
+const BASE_CAP = 500;
+const RESET_INTERVAL = 60*60*1000; // 1 hour for demo
 
-// Timer
+// LOAD SAVED DATA
+let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+totalPoints = saved.totalPoints || 0;
+capMultiplier = saved.capMultiplier || 1;
+lastDrop = saved.lastDrop || Date.now();
+
+document.getElementById('total').innerText = totalPoints;
+
+// TIMER
 function updateTimer(){
-  const remaining=Math.max(0,CAP_INTERVAL-(Date.now()-lastReset));
-  const hrs=Math.floor(remaining/3600000);
-  const mins=Math.floor((remaining%3600000)/60000);
-  const secs=Math.floor((remaining%60000)/1000);
-  document.getElementById('timer').innerText=`Next reset in: ${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-  if(remaining<=0){
-    total=0; capMultiplier=1; lastReset=Date.now(); history=[];
-    localStorage.removeItem(STORAGE_KEY);
-    document.getElementById('total').innerText=`Total Points: ${total}`;
-    document.getElementById('last').innerText='Last: —';
+  let remaining = Math.max(0, RESET_INTERVAL - (Date.now() - lastDrop));
+  let mins = Math.floor(remaining/60000);
+  let secs = Math.floor((remaining%60000)/1000);
+  document.getElementById('timer').innerText = `Reset in ${mins}:${secs.toString().padStart(2,'0')}`;
+  if(remaining <= 0){
+    totalPoints = 0;
+    capMultiplier++;
+    lastDrop = Date.now();
+    saveData();
+    document.getElementById('total').innerText = totalPoints;
   }
 }
-setInterval(updateTimer,1000);
+setInterval(updateTimer, 1000);
 updateTimer();
 
-// Pegs & slots
-const rows=12, cols=8, pegs=[], slotCount=cols+1;
+function saveData(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({totalPoints, capMultiplier, lastDrop}));
+}
+
+// PEGS
+const rows = 8, cols = 6;
+let pegs = [];
+const margin = 20, topY = 50, bottomY = height - 100;
+const rowSpacing = (bottomY-topY)/rows;
+const colSpacing = (width-margin*2)/cols;
+
 for(let r=0;r<rows;r++){
   for(let c=0;c<cols;c++){
-    const x=(c+0.5+(r%2)*0.5)*width/cols;
-    const y=60+r*(height-160)/rows;
-    pegs.push({x,y,r:7});
+    let offset = (r%2)*(colSpacing/2);
+    pegs.push({x: margin + c*colSpacing + offset + colSpacing/2, y: topY + r*rowSpacing, r:6});
   }
 }
 
-// Base slot scores
-const baseScores=Array.from({length:slotCount},(_,i)=>Math.max(10,40-Math.abs(i-(slotCount-1)/2)*5));
+// SLOTS
+const slotCount = rows + 1;
+const baseScores = Array.from({length: slotCount}, (_,i)=>Math.max(5, 50 - Math.abs(i-(slotCount-1)/2)*6));
 
-// Ball
-function drawBall(){ if(!ball) return; 
-  const grad=ctx.createRadialGradient(ball.x,ball.y,3,ball.x,ball.y,ball.r);
-  grad.addColorStop(0,'#fff'); grad.addColorStop(0.5,'#ffd66b'); grad.addColorStop(1,'#ff8c00');
-  ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
-}
+// BALL
+let ball = null;
+let dropping = false;
 
-// Physics
-function simulate(dt){
-  if(!ball) return;
-  const g=900; ball.vy+=g*dt; ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
-  // walls
-  if(ball.x<ball.r){ ball.x=ball.r; ball.vx=Math.abs(ball.vx)*0.5; ball.vy*=0.9; }
-  if(ball.x>width-ball.r){ ball.x=width-ball.r; ball.vx=-Math.abs(ball.vx)*0.5; ball.vy*=0.9; }
+function drawStatic(){
+  ctx.clearRect(0,0,width,height);
   // pegs
   for(const p of pegs){
-    const dx=ball.x-p.x, dy=ball.y-p.y, dist=Math.sqrt(dx*dx+dy*dy), minD=ball.r+p.r;
-    if(dist<minD && dist>0){ const nx=dx/dist, ny=dy/dist, rel=ball.vx*nx+ball.vy*ny; ball.vx-=(1.8*rel)*nx; ball.vy-=(1.8*rel)*ny; const overlap=minD-dist; ball.x+=nx*overlap; ball.y+=ny*overlap; }
+    ctx.beginPath();
+    ctx.fillStyle='#e6e6ff';
+    ctx.shadowColor='#7fffd4';
+    ctx.shadowBlur=6;
+    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.fill();
   }
-  // landing
-  if(ball.y>=height-60){
-    const idx=Math.min(slotCount-1,Math.floor(ball.x/(width/slotCount)));
-    const pts=baseScores[idx];
-    total+=pts;
-    if(total>=BASE_CAP*capMultiplier){ lastReset=Date.now(); capMultiplier++; }
-    if(total>BASE_CAP*capMultiplier) total=BASE_CAP*capMultiplier;
-    document.getElementById('total').innerText=`Total Points: ${total}`;
-    history.unshift({slot:idx,points:pts,ts:new Date().toISOString()});
-    history=history.slice(0,200);
-    document.getElementById('last').innerText=`Last: ${pts}pts (slot ${idx})`;
-    localStorage.setItem(STORAGE_KEY,JSON.stringify({total,capMultiplier,lastReset,history}));
-    ball=null; dropping=false;
-  }
-}
-
-// Draw static
-function drawStatic(){
-  // gradient background
-  const grad=ctx.createLinearGradient(0,0,0,height);
-  grad.addColorStop(0,'#071021'); grad.addColorStop(1,'#0c1223');
-  ctx.fillStyle=grad; ctx.fillRect(0,0,width,height);
-  // pegs
-  for(const p of pegs){ ctx.beginPath(); ctx.fillStyle='#9df'; ctx.shadowColor='#0ff'; ctx.shadowBlur=5; ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
   ctx.shadowBlur=0;
   // slots
-  const slotH=50;
+  const slotTop = height-80, slotH=70;
+  ctx.fillStyle="#111";
+  ctx.fillRect(0,slotTop,width,slotH);
+  ctx.strokeStyle="#2b2b2b";
   for(let i=0;i<slotCount;i++){
-    ctx.fillStyle="#111"; ctx.fillRect(i*width/slotCount,height-slotH,width/slotCount,slotH);
-    ctx.fillStyle="#ffd66b"; ctx.font="bold 16px monospace"; ctx.textAlign="center"; ctx.fillText(baseScores[i],i*width/slotCount+width/slotCount/2,height-20);
+    ctx.strokeRect(i*width/slotCount+4, slotTop+4, width/slotCount-8, slotH-8);
+    ctx.fillStyle="#ffd66b";
+    ctx.font="bold 16px monospace";
+    ctx.textAlign="center";
+    ctx.fillText(baseScores[i], i*width/slotCount+width/slotCount/2, slotTop+40);
   }
 }
 drawStatic();
 
-// Render
-function render(){ drawStatic(); drawBall(); if(dropping) requestAnimationFrame(render); }
+function drawBall(){
+  if(!ball) return;
+  let grad = ctx.createRadialGradient(ball.x,ball.y,2,ball.x,ball.y,ball.r);
+  grad.addColorStop(0,'#fff2b2');
+  grad.addColorStop(0.5,'#ffb347');
+  grad.addColorStop(1,'#ff8c00');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+  ctx.fill();
+}
 
-// Drop
-document.getElementById('drop').addEventListener('click',()=>{
-  if(dropping) return;
-  ball={x:width/2,y:30,vx:(Math.random()-0.5)*50,vy:0,r:10};
+// PHYSICS
+function simulatePhysics(dt){
+  if(!ball) return;
+  const g=600;
+  ball.vy+=g*dt;
+  ball.vx*=0.995; ball.vy*=0.995;
+  ball.x+=ball.vx*dt*60; ball.y+=ball.vy*dt*60;
+
+  // wall collisions
+  if(ball.x-ball.r<0){ ball.x=ball.r; ball.vx=Math.abs(ball.vx)*0.6; }
+  if(ball.x+ball.r>width){ ball.x=width-ball.r; ball.vx=-Math.abs(ball.vx)*0.6; }
+
+  // peg collisions (simplified)
+  for(const p of pegs){
+    const dx=ball.x-p.x, dy=ball.y-p.y;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    const minD = ball.r+p.r;
+    if(dist<minD && dist>0){
+      const nx=dx/dist, ny=dy/dist, rel=ball.vx*nx+ball.vy*ny;
+      ball.vx-=(1.5*rel)*nx;
+      ball.vy-=(1.5*rel)*ny;
+      ball.vx+=(Math.random()-0.5)*5;
+      ball.y-=0.5; // prevent sticking
+    }
+  }
+
+  // bottom slots
+  if(ball.y+ball.r >= height-80){
+    const idx = Math.floor(ball.x/(width/slotCount));
+    ball.x = idx*width/slotCount + width/slotCount/2;
+    ball.y = height-80-ball.r;
+    ball.vx=0; ball.vy=0;
+    dropping=false;
+    addPoints(idx);
+  }
+}
+
+function addPoints(idx){
+  const pts = baseScores[idx];
+  totalPoints = Math.min(BASE_CAP*capMultiplier, totalPoints + pts);
+  document.getElementById('total').innerText = totalPoints;
+  document.getElementById('last').innerText = `Last: ${pts} pts (slot ${idx})`;
+  if(totalPoints >= BASE_CAP*capMultiplier) document.getElementById('drop').disabled=true;
+  lastDrop = Date.now();
+  saveData();
+}
+
+function render(){
+  drawStatic();
+  drawBall();
+  if(dropping) requestAnimationFrame(render);
+}
+
+// DROP
+document.getElementById('drop').addEventListener('click', ()=>{
+  if(dropping || totalPoints >= BASE_CAP*capMultiplier) return;
+  ball={x:width/2, y:10, vx:(Math.random()-0.5)*4, vy:0, r:8};
   dropping=true;
-  requestAnimationFrame(function step(){ simulate(1/60); render(); if(dropping) requestAnimationFrame(step); });
+  requestAnimationFrame(function step(){
+    simulatePhysics(1/60);
+    render();
+    if(dropping) requestAnimationFrame(step);
+  });
 });
 
-// Reset
-document.getElementById('reset').addEventListener('click',()=>{
-  total=0; capMultiplier=1; history=[]; ball=null; dropping=false; lastReset=Date.now();
-  localStorage.removeItem(STORAGE_KEY);
-  document.getElementById('total').innerText=`Total Points: ${total}`;
+// RESET
+document.getElementById('reset').addEventListener('click', ()=>{
+  totalPoints=0; ball=null; dropping=false;
+  capMultiplier=1; lastDrop=Date.now();
+  document.getElementById('total').innerText=totalPoints;
   document.getElementById('last').innerText='Last: —';
+  document.getElementById('drop').disabled=false;
+  saveData();
   drawStatic();
 });
 </script>
