@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pachinko Simulator</title>
 <style>
-  body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; color:#fff; font-family:monospace; }
+  body { margin:0; background:#000; display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; color:#fff; font-family:monospace; }
   #container { text-align:center; }
   canvas { border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,0.7); display:block; margin:auto; background:#071021; }
   button { padding:8px 14px; border-radius:8px; font-weight:800; margin:0 4px; cursor:pointer; }
@@ -15,7 +15,7 @@
 </head>
 <body>
 <div id="container">
-  <div style="color:#ffd66b; font-weight:800; margin-bottom:8px;">Total Points (Max 500)</div>
+  <div style="color:#ffd66b; font-weight:800; margin-bottom:8px;">Total Points (Max cap updates automatically)</div>
   <div id="total" style="font-size:28px; margin-bottom:12px;">0</div>
   <canvas id="pachinko" width="640" height="840"></canvas>
   <div style="margin-top:12px;">
@@ -25,27 +25,17 @@
   <div id="last" style="color:#9aa6b2; margin-top:10px; font-size:13px;">Last: —</div>
 </div>
 
-<script src="pointsManager.js"></script>
+<script src="PointsManager.js"></script>
 <script>
 const canvas = document.getElementById('pachinko');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height;
 const rows = 12, slotCount = rows + 1;
-const POINT_CAP = 500;
 
 let displayTotal = PointsManager.getPoints();
-let history = [];
-let ball = null, dropping = false;
+document.getElementById('total').innerText = displayTotal;
 
-// Update displayed points immediately
-PointsManager.displayPoints('total');
-
-document.getElementById('last').innerText = 'Last: —';
-
-// Initialize base scores
-const baseScores = Array.from({ length: slotCount }, (_, i) => Math.max(1, 50 - Math.abs(i - (slotCount-1)/2)*8));
-
-// Pegs
+// Setup pegs & slots
 const pegs = [];
 const margin = 24, topY=60, bottomY=height-140;
 const pegCols = 10, pegRows = rows;
@@ -60,18 +50,19 @@ for(let r=0;r<pegRows;r++){
   }
 }
 
-// Pre-render static canvas for pegs & slots
+// Base scores
+const baseScores = Array.from({ length: slotCount }, (_, i) => Math.max(1, 50 - Math.abs(i - (slotCount-1)/2)*8));
+
+// Render static canvas
 const staticCanvas = document.createElement('canvas');
 staticCanvas.width = width; staticCanvas.height = height;
 const staticCtx = staticCanvas.getContext('2d');
-
 function drawStatic(){
   const grad = staticCtx.createLinearGradient(0,0,0,height);
   grad.addColorStop(0,'#071021');
   grad.addColorStop(1,'#0c1223');
   staticCtx.fillStyle = grad;
   staticCtx.fillRect(0,0,width,height);
-
   for(const p of pegs){
     staticCtx.beginPath();
     staticCtx.fillStyle = '#e6e6ff';
@@ -81,112 +72,81 @@ function drawStatic(){
     staticCtx.fill();
   }
   staticCtx.shadowBlur = 0;
-
   const slotTop=height-120, slotH=96, slotW=width/slotCount;
   staticCtx.fillStyle="#111"; staticCtx.fillRect(0,slotTop,width,slotH);
   staticCtx.strokeStyle="#2b2b2b";
   for(let i=0;i<slotCount;i++){
     staticCtx.strokeRect(i*slotW+6,slotTop+6,slotW-12,slotH-12);
-    staticCtx.fillStyle="#cfcfcf"; staticCtx.font="bold 14px monospace"; staticCtx.textAlign="center"; 
-    staticCtx.fillText(i,i*slotW+slotW/2,slotTop+28);
-    staticCtx.fillStyle="#ffd66b"; staticCtx.font="bold 18px monospace"; 
-    staticCtx.fillText(baseScores[i],i*slotW+slotW/2,slotTop+58);
+    staticCtx.fillStyle="#cfcfcf"; staticCtx.font="bold 14px monospace"; staticCtx.textAlign="center"; staticCtx.fillText(i,i*slotW+slotW/2,slotTop+28);
+    staticCtx.fillStyle="#ffd66b"; staticCtx.font="bold 18px monospace"; staticCtx.fillText(baseScores[i],i*slotW+slotW/2,slotTop+58);
   }
 }
 drawStatic();
+ctx.drawImage(staticCanvas,0,0);
 
-// Audio
-let audioCtx = null;
-function ensureAudio(){ if(!audioCtx) try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch{}; return audioCtx; }
-function plink(f=900,d=0.04){ const ctx=ensureAudio(); if(!ctx)return; const o=ctx.createOscillator(),g=ctx.createGain(); o.type='sine'; o.frequency.value=f*(0.9+Math.random()*0.2); g.gain.value=0.06; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d); o.stop(ctx.currentTime+d+0.01);}
-function plonk(f=220,d=0.18){ const ctx=ensureAudio(); if(!ctx)return; const o=ctx.createOscillator(),g=ctx.createGain(); o.type='triangle'; o.frequency.value=f*(0.95+Math.random()*0.08); g.gain.value=0.12; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d); o.stop(ctx.currentTime+d+0.01);}
-
-// Draw ball
+// Physics & ball
+let ball=null,dropping=false;
 function drawBall(){
   if(!ball) return;
   const grad = ctx.createRadialGradient(ball.x,ball.y,2,ball.x,ball.y,ball.r);
-  grad.addColorStop(0,'#fff2b2');
-  grad.addColorStop(0.5,'#ffb347');
-  grad.addColorStop(1,'#ff8c00');
+  grad.addColorStop(0,'#fff2b2'); grad.addColorStop(0.5,'#ffb347'); grad.addColorStop(1,'#ff8c00');
   ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
-  ctx.fill();
+  ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
 }
 
-// Physics
 function simulatePhysics(dt){
   if(!ball) return;
-  const g=900; ball.vy+=g*dt; ball.vx*=Math.pow(0.999,dt*60); ball.vy*=Math.pow(0.999,dt*60); ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
+  const g=900; ball.vy+=g*dt; ball.vx*=Math.pow(0.999,dt*60); ball.vy*=Math.pow(0.999,dt*60);
+  ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
   const lb=8, rb=width-8;
-  if(ball.x-ball.r<lb){ ball.x=lb+ball.r; ball.vx=Math.abs(ball.vx)*0.6; ball.vy*=0.9;}
-  if(ball.x+ball.r>rb){ ball.x=rb-ball.r; ball.vx=-Math.abs(ball.vx)*0.6; ball.vy*=0.9;}
+  if(ball.x-ball.r<lb){ ball.x=lb+ball.r; ball.vx=Math.abs(ball.vx)*0.6; ball.vy*=0.9; }
+  if(ball.x+ball.r>rb){ ball.x=rb-ball.r; ball.vx=-Math.abs(ball.vx)*0.6; ball.vy*=0.9; }
   for(const p of pegs){
     const dx=ball.x-p.x, dy=ball.y-p.y, dist=Math.sqrt(dx*dx+dy*dy), minD=ball.r+p.r;
     if(dist<minD && dist>0){
       const nx=dx/dist, ny=dy/dist, rel=ball.vx*nx+ball.vy*ny;
       ball.vx-=(1.8*rel)*nx; ball.vy-=(1.8*rel)*ny; ball.vx+=(Math.random()-0.5)*20;
-      const overlap=minD-dist+0.5; ball.x+=nx*overlap; ball.y+=ny*overlap;
-      plink(800-(p.y/height)*300,0.03);
     }
   }
   const st=height-120;
   if(ball.y+ball.r>=st){
     const idx=Math.min(slotCount-1,Math.max(0,Math.floor(ball.x/(width/slotCount))));
-    ball.x=idx*(width/slotCount)+(width/slotCount)/2; ball.y=height-60; ball.vx=0; ball.vy=0; ball.restingSlot=idx; dropping=false;
-    plonk(200+Math.random()*60,0.24); setTimeout(()=>revealScore(idx),750);
+    ball.x=idx*(width/slotCount)+(width/slotCount)/2; ball.y=height-60; ball.vx=0; ball.vy=0; dropping=false;
+    revealScore(idx);
   }
 }
 
-// Reveal score
 function revealScore(idx){
   const pts = baseScores[idx]||0;
-  const newTotal = Math.min(POINT_CAP, PointsManager.getPoints() + pts);
   PointsManager.addPoints(pts);
-  displayTotal = newTotal;
+  displayTotal = PointsManager.getPoints();
   document.getElementById('total').innerText = displayTotal;
-  history.unshift({slot:idx, points:pts, ts:new Date().toISOString()});
   document.getElementById('last').innerText = `Last: ${pts}pts (slot ${idx})`;
-  if(displayTotal>=POINT_CAP) document.getElementById('drop').disabled=true;
+  if(displayTotal >= PointsManager.getCap()) document.getElementById('drop').disabled=true;
 }
 
-// Render
-function render(){
-  ctx.drawImage(staticCanvas,0,0);
-  drawBall();
-  if(dropping) requestAnimationFrame(render);
-}
+function render(){ ctx.drawImage(staticCanvas,0,0); drawBall(); if(dropping) requestAnimationFrame(render); }
 
-// Drop button
 document.getElementById('drop').addEventListener('click', ()=>{
-  if(dropping || displayTotal>=POINT_CAP) return;
-  ball={x:width/2, y:28, vx:(Math.random()-0.5)*6, vy:0, r:10, restingSlot:null};
-  dropping=true; ensureAudio();
-  const last={t:performance.now()};
-  function step(now){
-    const dt=Math.min(32,now-last.t)/1000; last.t=now;
-    simulatePhysics(dt); render();
+  if(dropping || displayTotal>=PointsManager.getCap()) return;
+  ball={x:width/2, y:28, vx:(Math.random()-0.5)*6, vy:0, r:10};
+  dropping=true;
+  requestAnimationFrame(function step(){
+    const dt=1/60;
+    simulatePhysics(dt);
+    render();
     if(dropping) requestAnimationFrame(step);
-  }
-  requestAnimationFrame(step);
+  });
 });
 
-// Reset points
 document.getElementById('reset').addEventListener('click', ()=>{
-  PointsManager.resetPoints();
-  displayTotal = 0;
-  history=[];
-  ball=null;
-  dropping=false;
-  document.getElementById('total').innerText=displayTotal;
+  PointsManager.data.total=0; PointsManager.data.cap=500; PointsManager.data.resetStart=null; PointsManager.save();
+  displayTotal = PointsManager.getPoints();
+  document.getElementById('total').innerText = displayTotal;
   document.getElementById('last').innerText='Last: —';
-  document.getElementById('drop').disabled=false;
-  drawStatic();
-  ctx.drawImage(staticCanvas,0,0);
+  ball=null; dropping=false;
+  drawStatic(); ctx.drawImage(staticCanvas,0,0);
 });
-
-// Initial draw
-ctx.drawImage(staticCanvas,0,0);
 </script>
 </body>
 </html>
