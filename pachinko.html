@@ -3,71 +3,148 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pachinko</title>
+<title>Pachinko Simulator</title>
 <style>
-body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; color:#fff; font-family:monospace; }
-#container { text-align:center; }
-canvas { border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,0.7); display:block; margin:auto; background:#071021; }
-button { padding:8px 14px; border-radius:8px; font-weight:800; margin:0 4px; cursor:pointer; }
-#drop { background:#0f766e; color:#fff; }
-#reset { background:#2b2b2b; color:#fff; }
-#total { font-size:28px; margin-bottom:12px; }
-#last { color:#9aa6b2; margin-top:10px; font-size:13px; }
-#timer { color:#ffd66b; font-weight:bold; margin-bottom:8px; }
+  body { margin:0; background:#071021; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; font-family:'Montserrat',sans-serif; flex-direction:column; }
+  canvas { background:#0c1223; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
+  #controls { margin-top:15px; }
+  button { padding:10px 20px; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin:0 5px; background:#ff4d4d; color:#fff; }
+  button:hover { background:#e63946; }
+  #total { margin-top:10px; font-size:1.3rem; color:#ffd66b; }
+  #timer { margin-top:5px; font-size:0.9rem; color:#9aa6b2; }
+  #last { margin-top:5px; font-size:0.9rem; color:#9aa6b2; }
 </style>
 </head>
 <body>
-<div id="container">
-  <div style="color:#ffd66b; font-weight:800; margin-bottom:8px;">Pachinko Points</div>
-  <div id="timer"></div>
-  <div id="total">0</div>
-  <canvas id="pachinko" width="640" height="840"></canvas>
-  <div style="margin-top:12px;">
-    <button id="drop">DROP</button>
-    <button id="reset">RESET POINTS</button>
-  </div>
-  <div id="last">Last: —</div>
+
+<canvas id="pachinko" width="320" height="480"></canvas>
+<div id="controls">
+  <button id="drop">DROP BALL</button>
+  <button id="reset">RESET POINTS</button>
 </div>
+<div id="total">Total Points: 0</div>
+<div id="timer">Next reset in: 01:00:00</div>
+<div id="last">Last: —</div>
 
 <script>
-const STORAGE_KEY = 'pachinkoTotal';
-let totalPoints = parseInt(localStorage.getItem(STORAGE_KEY)) || 0;
-let cap = parseInt(localStorage.getItem('pachinkoCap')) || 500;
-let capReset = parseInt(localStorage.getItem('pachinkoReset')) || 0;
+const STORAGE_KEY='pachinko.session.v1';
+const CAP_INTERVAL=60*60*1000; // 1 hour
+const BASE_CAP=500;
+const canvas=document.getElementById('pachinko');
+const ctx=canvas.getContext('2d');
+const width=canvas.width, height=canvas.height;
+let total=0, capMultiplier=1, lastReset=Date.now(), history=[], ball=null, dropping=false;
 
-const totalEl = document.getElementById('total');
-const timerEl = document.getElementById('timer');
-const dropBtn = document.getElementById('drop');
+// Load saved
+try{
+  const saved=JSON.parse(localStorage.getItem(STORAGE_KEY));
+  if(saved){
+    const elapsed=Date.now()-saved.lastReset;
+    total=saved.total||0;
+    capMultiplier=saved.capMultiplier||1;
+    history=saved.history||[];
+    lastReset=saved.lastReset||Date.now();
+    if(elapsed>=CAP_INTERVAL){ total=0; capMultiplier=1; history=[]; lastReset=Date.now(); }
+  }
+}catch{}
+document.getElementById('total').innerText=`Total Points: ${total}`;
+if(history.length) document.getElementById('last').innerText=`Last: ${history[0].points}pts (slot ${history[0].slot})`;
 
-function updateUI(){
-  totalEl.textContent = totalPoints;
-  const remaining = Math.max(0, capReset - Date.now());
-  if(remaining>0){
-    const mins = Math.floor(remaining/60000);
-    const secs = Math.floor((remaining%60000)/1000);
-    timerEl.textContent = `Next cap in ${mins}m ${secs}s`;
-    dropBtn.disabled=true;
-  } else {
-    timerEl.textContent = '';
-    dropBtn.disabled=false;
+// Timer
+function updateTimer(){
+  const remaining=Math.max(0,CAP_INTERVAL-(Date.now()-lastReset));
+  const hrs=Math.floor(remaining/3600000);
+  const mins=Math.floor((remaining%3600000)/60000);
+  const secs=Math.floor((remaining%60000)/1000);
+  document.getElementById('timer').innerText=`Next reset in: ${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+  if(remaining<=0){
+    total=0; capMultiplier=1; lastReset=Date.now(); history=[];
+    localStorage.removeItem(STORAGE_KEY);
+    document.getElementById('total').innerText=`Total Points: ${total}`;
+    document.getElementById('last').innerText='Last: —';
   }
 }
-updateUI();
-setInterval(updateUI, 1000);
+setInterval(updateTimer,1000);
+updateTimer();
 
-// --- Simplified pachinko scoring for demo ---
-dropBtn.addEventListener('click', ()=>{
-  if(totalPoints>=cap) return;
-  let earned = Math.floor(Math.random()*50)+5; 
-  totalPoints += earned;
-  if(totalPoints>=cap){
-    capReset = Date.now() + 60*60*1000;
-    totalPoints = cap;
-    localStorage.setItem('pachinkoCap', cap+500);
-    localStorage.setItem('pachinkoReset', capReset);
+// Pegs & slots
+const rows=8, cols=6, pegs=[], slotCount=cols+1;
+for(let r=0;r<rows;r++){
+  for(let c=0;c<cols;c++){
+    const x=(c+0.5+(r%2)*0.5)*width/cols;
+    const y=40+r*(height-120)/rows;
+    pegs.push({x,y,r:6});
   }
-  localStorage.setItem(STORAGE_KEY, totalPoints);
-  updateUI();
+}
+
+// Base slot scores
+const baseScores=Array.from({length:slotCount},(_,i)=>Math.max(5,30-Math.abs(i-(slotCount-1)/2)*4));
+
+// Ball
+function drawBall(){ if(!ball) return; ctx.beginPath(); ctx.fillStyle="#ffb347"; ctx.arc(ball.x,ball.y,8,0,Math.PI*2); ctx.fill(); }
+
+// Physics
+function simulate(dt){
+  if(!ball) return;
+  const g=600; ball.vy+=g*dt; ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
+  // walls
+  if(ball.x<8){ ball.x=8; ball.vx=Math.abs(ball.vx)*0.5; ball.vy*=0.9; }
+  if(ball.x>width-8){ ball.x=width-8; ball.vx=-Math.abs(ball.vx)*0.5; ball.vy*=0.9; }
+  // pegs
+  for(const p of pegs){
+    const dx=ball.x-p.x, dy=ball.y-p.y, dist=Math.sqrt(dx*dx+dy*dy), minD=ball.r+p.r;
+    if(dist<minD && dist>0){ const nx=dx/dist, ny=dy/dist, rel=ball.vx*nx+ball.vy*ny; ball.vx-=(1.8*rel)*nx; ball.vy-=(1.8*rel)*ny; const overlap=minD-dist; ball.x+=nx*overlap; ball.y+=ny*overlap; } 
+  }
+  // landing
+  if(ball.y>=height-40){
+    const idx=Math.min(slotCount-1,Math.floor(ball.x/(width/slotCount)));
+    const pts=baseScores[idx];
+    total+=pts;
+    if(total>=BASE_CAP*capMultiplier){ lastReset=Date.now(); capMultiplier++; }
+    if(total>BASE_CAP*capMultiplier) total=BASE_CAP*capMultiplier;
+    document.getElementById('total').innerText=`Total Points: ${total}`;
+    history.unshift({slot:idx,points:pts,ts:new Date().toISOString()});
+    history=history.slice(0,200);
+    document.getElementById('last').innerText=`Last: ${pts}pts (slot ${idx})`;
+    localStorage.setItem(STORAGE_KEY,JSON.stringify({total,capMultiplier,lastReset,history}));
+    ball=null; dropping=false;
+  }
+}
+
+// Draw static
+function drawStatic(){
+  ctx.fillStyle="#0c1223"; ctx.fillRect(0,0,width,height);
+  ctx.fillStyle="#fff"; for(const p of pegs){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
+  const slotH=36;
+  for(let i=0;i<slotCount;i++){
+    ctx.fillStyle="#111"; ctx.fillRect(i*width/slotCount,height-slotH,width/slotCount,slotH);
+    ctx.fillStyle="#ffd66b"; ctx.font="bold 14px monospace"; ctx.textAlign="center"; ctx.fillText(baseScores[i],i*width/slotCount+width/slotCount/2,height-12);
+  }
+}
+drawStatic();
+
+// Render
+function render(){
+  drawStatic();
+  drawBall();
+  if(dropping) requestAnimationFrame(render);
+}
+
+// Drop
+document.getElementById('drop').addEventListener('click',()=>{
+  if(dropping) return;
+  ball={x:width/2,y:20,vx:(Math.random()-0.5)*40,vy:0,r:8};
+  dropping=true;
+  requestAnimationFrame(function step(t){ simulate(1/60); render(); if(dropping) requestAnimationFrame(step); });
+});
+
+// Reset
+document.getElementById('reset').addEventListener('click',()=>{
+  total=0; capMultiplier=1; history=[]; ball=null; dropping=false; lastReset=Date.now();
+  localStorage.removeItem(STORAGE_KEY);
+  document.getElementById('total').innerText=`Total Points: ${total}`;
+  document.getElementById('last').innerText='Last: —';
+  drawStatic();
 });
 </script>
 </body>
