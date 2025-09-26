@@ -1,42 +1,65 @@
-// pointsManager.js
-const PointsManager = (() => {
-  const KEY = 'totalPoints';
+const STORAGE_KEY = 'GambleHub.points.v2';
+const BASE_CAP = 500; // first tier cap
+const RESET_INTERVAL = 60*60*1000; // 1 hour in ms
 
-  function getPoints() {
-    return parseInt(localStorage.getItem(KEY) || '0');
-  }
+const PointsManager = {
+  data: { total:0, cap:BASE_CAP, resetStart:null },
 
-  function addPoints(amount) {
-    let total = getPoints();
-    total += amount;
-    localStorage.setItem(KEY, total);
-    return total;
-  }
+  load() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if(stored) this.data = stored;
+    } catch {}
+  },
 
-  function spendPoints(amount) {
-    let total = getPoints();
-    if (total >= amount) {
-      total -= amount;
-      localStorage.setItem(KEY, total);
-      return true;
+  save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
+  },
+
+  getPoints() {
+    this.checkReset();
+    return this.data.total;
+  },
+
+  getCap() {
+    this.checkReset();
+    return this.data.cap;
+  },
+
+  addPoints(amount) {
+    this.checkReset();
+    this.data.total = Math.min(this.data.total + amount, this.data.cap);
+    this.save();
+  },
+
+  checkReset() {
+    if(this.data.total >= this.data.cap && this.data.resetStart===null) {
+      this.data.resetStart = Date.now();
+      this.save();
     }
-    return false;
-  }
+    if(this.data.resetStart){
+      const elapsed = Date.now() - this.data.resetStart;
+      if(elapsed >= RESET_INTERVAL){
+        this.data.cap += BASE_CAP; // increase cap by 500
+        this.data.resetStart = null;
+        this.save();
+      }
+    }
+  },
 
-  function resetPoints() {
-    localStorage.setItem(KEY, 0);
-  }
-
-  function displayPoints(elId) {
+  displayPoints(elId){
     const el = document.getElementById(elId);
-    if (el) el.innerText = getPoints();
+    if(!el) return;
+    el.innerText = this.getPoints();
+    // Optional: show cap next to total
+    const capEl = document.createElement('span');
+    capEl.style.fontSize='14px';
+    capEl.style.color='#ffd66b';
+    capEl.innerText = ` / ${this.getCap()}`;
+    if(!el.nextSibling) el.parentNode.appendChild(capEl);
   }
+};
 
-  return {
-    getPoints,
-    addPoints,
-    spendPoints,
-    resetPoints,
-    displayPoints
-  };
-})();
+// Initialize on load
+PointsManager.load();
+setInterval(()=>PointsManager.save(), 1000);
