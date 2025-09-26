@@ -3,170 +3,128 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Slot Machine</title>
+<title>Gamblecore Slots</title>
 <style>
-  body { 
-    margin:0; background:#071021; color:#fff; font-family:monospace; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh;
+  body {
+    margin:0;
+    font-family: 'Montserrat', sans-serif;
+    background: linear-gradient(135deg,#071021 0%,#0c1223 100%);
+    color:#fff;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
   }
-  canvas { 
-    background:#0b1a2f; border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,0.7); 
-  }
-  #controls { margin-top:16px; display:flex; gap:12px; align-items:center; }
-  button { padding:8px 16px; font-weight:800; border-radius:8px; cursor:pointer; }
-  #spin { background:#0f766e; color:#fff; }
-  #info { margin-top:12px; font-size:16px; color:#ffd66b; text-align:center; }
+  h1 { color:#ffd66b; margin-bottom:10px; text-shadow:0 0 10px #ffd66b88; }
+  #reels { display:flex; gap:15px; font-size:3rem; margin:20px 0; }
+  button { padding:10px 20px; border:none; border-radius:8px; background:#ff4d4d; color:#fff; font-weight:700; cursor:pointer; margin:0 5px; }
+  button:disabled { background:#555; cursor:not-allowed; }
+  #total, #last { margin:8px 0; font-size:1.2rem; color:#cfcfcf; }
 </style>
 </head>
 <body>
-<canvas id="slots" width="360" height="100"></canvas>
-<div id="controls">
-  <button id="spin">SPIN (25 chips)</button>
+
+<h1>🎰 Slots</h1>
+<div id="reels">
+  <div id="r1">❓</div>
+  <div id="r2">❓</div>
+  <div id="r3">❓</div>
+</div>
+
+<div id="total">Total Points: 0</div>
+<div id="last">Last: —</div>
+
+<div>
+  <button id="spin">SPIN</button>
   <button id="reset">RESET</button>
 </div>
-<div id="info">Chips: <span id="chips">100</span> | Jackpot: <span id="jackpot">50</span></div>
 
 <script>
-const canvas = document.getElementById('slots');
-const ctx = canvas.getContext('2d');
-const width = canvas.width, height = canvas.height;
-const reelCount = 3;
-const symbols = ['🍒','🍋','🍊','🍉','⭐','💎'];
-const spinCost = 25;
-const maxChips = 500;
-const STORAGE_KEY='slotmachine.session.v2';
-let reels=[], spinning=false;
-let chips=100, jackpot=50;
-let lastWinTime = null;
+// --- CONFIG ---
+const symbols = ["🍒","🍋","🍊","🍉","⭐","💎"];
+const SPIN_DURATION = 1500; // spin in ms
+const POINT_CAPS = [500,1000,1500]; // tiered caps
+const REWARD_SMALL = 10; // small reward
+const REWARD_MEDIUM = 30; // 2-match reward
+const REWARD_JACKPOT = 100; // 3-match reward
 
-// Load saved data
-try {
-  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-  chips = stored?.chips || 100;
-  jackpot = stored?.jackpot || 50;
-  lastWinTime = stored?.lastWinTime || null;
-} catch{}
-document.getElementById('chips').innerText=chips;
-document.getElementById('jackpot').innerText=jackpot;
+// --- STATE ---
+let currentCapIndex = 0;
+let totalPoints = parseInt(localStorage.getItem('slotsTotal')) || 0;
+let lastResult = '';
+let chosenSymbol = null; // optional bias symbol
+let spinButton = document.getElementById('spin');
+let lastEl = document.getElementById('last');
+let totalEl = document.getElementById('total');
+const reels = [document.getElementById('r1'), document.getElementById('r2'), document.getElementById('r3')];
 
-// 24-hour lock check
-function isLocked() {
-  if(!lastWinTime) return false;
-  const next = new Date(lastWinTime);
-  next.setHours(next.getHours()+24);
-  return new Date() < next;
+function getCurrentCap(){ return POINT_CAPS[currentCapIndex] || POINT_CAPS[POINT_CAPS.length-1]; }
+function saveState(){ localStorage.setItem('slotsTotal', totalPoints); localStorage.setItem('slotsCapIndex', currentCapIndex); }
+
+// --- FUNCTIONS ---
+function updateUI(){
+  totalEl.innerText = `Total Points: ${totalPoints}`;
+  lastEl.innerText = `Last: ${lastResult}`;
+  spinButton.disabled = totalPoints>=getCurrentCap();
 }
 
-// Initialize reels
-for(let i=0;i<reelCount;i++){
-  reels.push({pos:0,vel:0,target:0});
+function addPoints(pts){
+  totalPoints = Math.min(getCurrentCap(), totalPoints + pts);
+  lastResult = `${pts}pts`;
+  saveState();
+  if(totalPoints>=getCurrentCap()){
+    spinButton.disabled=true;
+    // Reset cap after 1 hour
+    setTimeout(()=>{
+      currentCapIndex = Math.min(currentCapIndex+1, POINT_CAPS.length-1);
+      totalPoints = 0;
+      saveState();
+      updateUI();
+    }, 60*60*1000);
+  }
+  updateUI();
 }
 
-// Draw reels (single line)
-function draw(){
-  ctx.clearRect(0,0,width,height);
-  const reelWidth = width/reelCount;
-  ctx.textAlign='center';
-  ctx.textBaseline='middle';
-  ctx.font = '80px sans-serif';
-  for(let i=0;i<reelCount;i++){
-    const r=reels[i];
-    const symIndex = Math.floor(r.pos/symbolHeight) % symbols.length;
-    const sym = symbols[(symIndex+symbols.length)%symbols.length];
-    ctx.fillText(sym, i*reelWidth + reelWidth/2, height/2);
-    // Reel separator
-    ctx.strokeStyle='#222';
-    ctx.lineWidth=4;
-    ctx.beginPath();
-    ctx.moveTo((i+1)*reelWidth,0); ctx.lineTo((i+1)*reelWidth,height); ctx.stroke();
-  }
-}
+// --- SPIN ---
+spinButton.addEventListener('click', ()=>{
+  if(totalPoints>=getCurrentCap()) return;
+  const start = Date.now();
+  const spinInterval = setInterval(()=>{
+    reels.forEach(r=>{
+      let pick;
+      if(chosenSymbol && Math.random()<0.15) pick = chosenSymbol; // biased symbol
+      else pick = symbols[Math.floor(Math.random()*symbols.length)];
+      r.innerText = pick;
+    });
+    if(Date.now()-start>=SPIN_DURATION){
+      clearInterval(spinInterval);
+      const results = reels.map(r=>r.innerText);
+      const [a,b,c] = results;
+      let pts = REWARD_SMALL;
 
-const symbolHeight = 80; // for single line display
+      // Jackpot
+      if(a===b && b===c && Math.random()<0.1) pts = REWARD_JACKPOT;
+      // 2 matches
+      else if(a===b||b===c||a===c) pts = REWARD_MEDIUM;
 
-// Spin animation
-function spin(){
-  if(spinning) return;
-  if(chips>=maxChips){ alert("You reached the max! Come back tomorrow."); return; }
-  if(chips<spinCost) { alert("Not enough chips!"); return; }
-  chips -= spinCost;
-  document.getElementById('chips').innerText=chips;
-
-  spinning=true;
-
-  // Decide result
-  const results = [];
-  for(let i=0;i<reelCount;i++){
-    const symIndex = Math.floor(Math.random()*symbols.length);
-    results.push(symIndex);
-  }
-
-  // Slight unfair chance
-  if(Math.random()<0.35){
-    const common = Math.floor(Math.random()*symbols.length);
-    for(let i=0;i<reelCount;i++) results[i]=common;
-  }
-
-  // Set target position
-  for(let i=0;i<reelCount;i++){
-    reels[i].target = results[i]*symbolHeight + symbolHeight*3; // extra spins
-    reels[i].vel = 0;
-  }
-
-  const deceleration = 0.02; // slower
-
-  function animate(){
-    let done=true;
-    for(let i=0;i<reelCount;i++){
-      const r=reels[i];
-      const diff = r.target - r.pos;
-      if(Math.abs(diff)>0.5){
-        done=false;
-        r.vel += diff*deceleration;
-        r.vel *= 0.92; // slower friction
-        r.pos += r.vel;
-      } else {
-        r.pos = r.target;
-      }
+      addPoints(pts);
+      lastResult += ` (${results.join(' ')})`;
     }
-    draw();
-    if(!done) requestAnimationFrame(animate);
-    else finish(results);
-  }
-  requestAnimationFrame(animate);
-}
-
-// Finish spin
-function finish(results){
-  let win=false;
-  if(results.every(v=>v===results[0])) win=true;
-  let winAmount=0;
-  if(win){
-    winAmount = jackpot;
-    chips += jackpot;
-    jackpot = 50;
-    lastWinTime = new Date().toISOString();
-  } else {
-    jackpot += 10;
-    chips = Math.max(chips, spinCost); // enough to spin again
-  }
-  document.getElementById('chips').innerText=chips;
-  document.getElementById('jackpot').innerText=jackpot;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({chips,jackpot,lastWinTime}));
-  spinning=false;
-}
-
-// Button events
-document.getElementById('spin').addEventListener('click', spin);
-document.getElementById('reset').addEventListener('click',()=>{
-  chips=100; jackpot=50; lastWinTime=null;
-  document.getElementById('chips').innerText=chips;
-  document.getElementById('jackpot').innerText=jackpot;
-  localStorage.removeItem(STORAGE_KEY);
-  draw();
+  },80);
 });
 
-// Initial draw
-draw();
+// --- RESET ---
+document.getElementById('reset').addEventListener('click', ()=>{
+  totalPoints=0; lastResult='—'; currentCapIndex=0;
+  saveState();
+  updateUI();
+});
+
+// --- INITIALIZE ---
+currentCapIndex = parseInt(localStorage.getItem('slotsCapIndex')) || 0;
+updateUI();
 </script>
+
 </body>
 </html>
