@@ -3,127 +3,86 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gamblecore Slots</title>
+<title>Slots</title>
 <style>
-  body {
-    margin:0;
-    font-family: 'Montserrat', sans-serif;
-    background: linear-gradient(135deg,#071021 0%,#0c1223 100%);
-    color:#fff;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    justify-content:center;
-    height:100vh;
-  }
-  h1 { color:#ffd66b; margin-bottom:10px; text-shadow:0 0 10px #ffd66b88; }
-  #reels { display:flex; gap:15px; font-size:3rem; margin:20px 0; }
-  button { padding:10px 20px; border:none; border-radius:8px; background:#ff4d4d; color:#fff; font-weight:700; cursor:pointer; margin:0 5px; }
+  body { background:#000; color:#fff; font-family:monospace; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; }
+  h1 { color:#ffd66b; text-shadow:0 0 10px #ffd66b55; }
+  button { margin:12px; padding:8px 16px; font-weight:800; border-radius:8px; cursor:pointer; background:#ff4d4d; border:none; color:#fff; }
   button:disabled { background:#555; cursor:not-allowed; }
-  #total, #last { margin:8px 0; font-size:1.2rem; color:#cfcfcf; }
+  #reel { font-size:50px; margin:20px; }
+  #total { margin-top:10px; font-size:24px; color:#0ff; }
+  #timer { font-size:14px; color:#ffd66b; margin-top:6px; }
 </style>
 </head>
 <body>
 
 <h1>🎰 Slots</h1>
-<div id="reels">
-  <div id="r1">❓</div>
-  <div id="r2">❓</div>
-  <div id="r3">❓</div>
-</div>
-
+<div id="reel">🍒 🍋 🍊</div>
+<button id="spin">SPIN (25 points)</button>
 <div id="total">Total Points: 0</div>
-<div id="last">Last: —</div>
-
-<div>
-  <button id="spin">SPIN</button>
-  <button id="reset">RESET</button>
-</div>
+<div id="timer"></div>
 
 <script>
-// --- CONFIG ---
-const symbols = ["🍒","🍋","🍊","🍉","⭐","💎"];
-const SPIN_DURATION = 1500; // spin in ms
-const POINT_CAPS = [500,1000,1500]; // tiered caps
-const REWARD_SMALL = 10; // small reward
-const REWARD_MEDIUM = 30; // 2-match reward
-const REWARD_JACKPOT = 100; // 3-match reward
+const SPIN_COST = 25;
+const REWARDS = ["🍒","🍋","🍊","🍇","⭐"];
+const STORAGE_KEY = 'slotsTotal';
+let totalPoints = parseInt(localStorage.getItem(STORAGE_KEY)) || 0;
+let cap = parseInt(localStorage.getItem('slotsCap')) || 500;
+let capReset = parseInt(localStorage.getItem('slotsReset')) || 0;
 
-// --- STATE ---
-let currentCapIndex = 0;
-let totalPoints = parseInt(localStorage.getItem('slotsTotal')) || 0;
-let lastResult = '';
-let chosenSymbol = null; // optional bias symbol
-let spinButton = document.getElementById('spin');
-let lastEl = document.getElementById('last');
-let totalEl = document.getElementById('total');
-const reels = [document.getElementById('r1'), document.getElementById('r2'), document.getElementById('r3')];
+const reelEl = document.getElementById('reel');
+const totalEl = document.getElementById('total');
+const timerEl = document.getElementById('timer');
+const spinBtn = document.getElementById('spin');
 
-function getCurrentCap(){ return POINT_CAPS[currentCapIndex] || POINT_CAPS[POINT_CAPS.length-1]; }
-function saveState(){ localStorage.setItem('slotsTotal', totalPoints); localStorage.setItem('slotsCapIndex', currentCapIndex); }
-
-// --- FUNCTIONS ---
 function updateUI(){
-  totalEl.innerText = `Total Points: ${totalPoints}`;
-  lastEl.innerText = `Last: ${lastResult}`;
-  spinButton.disabled = totalPoints>=getCurrentCap();
-}
-
-function addPoints(pts){
-  totalPoints = Math.min(getCurrentCap(), totalPoints + pts);
-  lastResult = `${pts}pts`;
-  saveState();
-  if(totalPoints>=getCurrentCap()){
-    spinButton.disabled=true;
-    // Reset cap after 1 hour
-    setTimeout(()=>{
-      currentCapIndex = Math.min(currentCapIndex+1, POINT_CAPS.length-1);
-      totalPoints = 0;
-      saveState();
-      updateUI();
-    }, 60*60*1000);
+  totalEl.textContent = `Total Points: ${totalPoints}`;
+  const remaining = Math.max(0, capReset - Date.now());
+  if(remaining>0){
+    const mins = Math.floor(remaining/60000);
+    const secs = Math.floor((remaining%60000)/1000);
+    timerEl.textContent = `Next cap in ${mins}m ${secs}s`;
+    spinBtn.disabled=true;
+  } else {
+    timerEl.textContent = '';
+    spinBtn.disabled=false;
   }
-  updateUI();
 }
-
-// --- SPIN ---
-spinButton.addEventListener('click', ()=>{
-  if(totalPoints>=getCurrentCap()) return;
-  const start = Date.now();
-  const spinInterval = setInterval(()=>{
-    reels.forEach(r=>{
-      let pick;
-      if(chosenSymbol && Math.random()<0.15) pick = chosenSymbol; // biased symbol
-      else pick = symbols[Math.floor(Math.random()*symbols.length)];
-      r.innerText = pick;
-    });
-    if(Date.now()-start>=SPIN_DURATION){
-      clearInterval(spinInterval);
-      const results = reels.map(r=>r.innerText);
-      const [a,b,c] = results;
-      let pts = REWARD_SMALL;
-
-      // Jackpot
-      if(a===b && b===c && Math.random()<0.1) pts = REWARD_JACKPOT;
-      // 2 matches
-      else if(a===b||b===c||a===c) pts = REWARD_MEDIUM;
-
-      addPoints(pts);
-      lastResult += ` (${results.join(' ')})`;
-    }
-  },80);
-});
-
-// --- RESET ---
-document.getElementById('reset').addEventListener('click', ()=>{
-  totalPoints=0; lastResult='—'; currentCapIndex=0;
-  saveState();
-  updateUI();
-});
-
-// --- INITIALIZE ---
-currentCapIndex = parseInt(localStorage.getItem('slotsCapIndex')) || 0;
 updateUI();
+setInterval(updateUI, 1000);
+
+// spin function
+spinBtn.addEventListener('click', ()=>{
+  if(totalPoints<SPIN_COST) return alert("Not enough points!");
+  totalPoints -= SPIN_COST;
+
+  // slow reel animation
+  let spins = 20;
+  const interval = setInterval(()=>{
+    reelEl.textContent = REWARDS.map(r=>REWARDS[Math.floor(Math.random()*REWARDS.length)]).join(" ");
+    spins--;
+    if(spins<=0){
+      clearInterval(interval);
+      // determine reward
+      let chosen = Math.random();
+      let reward = 0;
+      if(chosen < 0.05) reward = 150;       // big jackpot rare
+      else if(chosen < 0.25) reward = 50;
+      else if(chosen < 0.6) reward = 20;
+      else reward = 5;
+      totalPoints += reward;
+
+      if(totalPoints>=cap){
+        capReset = Date.now() + 60*60*1000; // 1 hour
+        totalPoints = cap;
+        localStorage.setItem('slotsCap', cap+500);
+        localStorage.setItem('slotsReset', capReset);
+      }
+      localStorage.setItem(STORAGE_KEY, totalPoints);
+      updateUI();
+    }
+  }, 100);
+});
 </script>
 
 </body>
