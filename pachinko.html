@@ -5,19 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pachinko Simulator</title>
 <style>
-  body { margin:0; background:#071021; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; font-family:'Montserrat',sans-serif; flex-direction:column; }
-  canvas { background:#0c1223; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
-  #controls { margin-top:15px; }
-  button { padding:10px 20px; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin:0 5px; background:#ff4d4d; color:#fff; }
+  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap');
+  body {
+    margin:0; padding:0; font-family:'Montserrat',sans-serif;
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    background: linear-gradient(135deg, #071021 0%, #0c1223 100%);
+    color:#fff; height:100vh;
+  }
+  canvas {
+    background:#0b101e; border-radius:16px;
+    box-shadow:0 20px 50px rgba(0,0,0,0.7);
+  }
+  #controls {
+    margin-top:20px; display:flex; gap:12px;
+  }
+  button {
+    padding:12px 24px; border:none; border-radius:10px;
+    font-weight:700; cursor:pointer; background:#ff4d4d; color:#fff;
+    transition:0.2s all;
+  }
   button:hover { background:#e63946; }
-  #total { margin-top:10px; font-size:1.3rem; color:#ffd66b; }
-  #timer { margin-top:5px; font-size:0.9rem; color:#9aa6b2; }
-  #last { margin-top:5px; font-size:0.9rem; color:#9aa6b2; }
+  #total { margin-top:15px; font-size:1.5rem; color:#ffd66b; }
+  #timer, #last { margin-top:5px; font-size:1rem; color:#9aa6b2; }
 </style>
 </head>
 <body>
 
-<canvas id="pachinko" width="320" height="480"></canvas>
+<canvas id="pachinko" width="480" height="720"></canvas>
 <div id="controls">
   <button id="drop">DROP BALL</button>
   <button id="reset">RESET POINTS</button>
@@ -27,7 +41,7 @@
 <div id="last">Last: —</div>
 
 <script>
-const STORAGE_KEY='pachinko.session.v1';
+const STORAGE_KEY='pachinko.session.v2';
 const CAP_INTERVAL=60*60*1000; // 1 hour
 const BASE_CAP=500;
 const canvas=document.getElementById('pachinko');
@@ -68,35 +82,39 @@ setInterval(updateTimer,1000);
 updateTimer();
 
 // Pegs & slots
-const rows=8, cols=6, pegs=[], slotCount=cols+1;
+const rows=12, cols=8, pegs=[], slotCount=cols+1;
 for(let r=0;r<rows;r++){
   for(let c=0;c<cols;c++){
     const x=(c+0.5+(r%2)*0.5)*width/cols;
-    const y=40+r*(height-120)/rows;
-    pegs.push({x,y,r:6});
+    const y=60+r*(height-160)/rows;
+    pegs.push({x,y,r:7});
   }
 }
 
 // Base slot scores
-const baseScores=Array.from({length:slotCount},(_,i)=>Math.max(5,30-Math.abs(i-(slotCount-1)/2)*4));
+const baseScores=Array.from({length:slotCount},(_,i)=>Math.max(10,40-Math.abs(i-(slotCount-1)/2)*5));
 
 // Ball
-function drawBall(){ if(!ball) return; ctx.beginPath(); ctx.fillStyle="#ffb347"; ctx.arc(ball.x,ball.y,8,0,Math.PI*2); ctx.fill(); }
+function drawBall(){ if(!ball) return; 
+  const grad=ctx.createRadialGradient(ball.x,ball.y,3,ball.x,ball.y,ball.r);
+  grad.addColorStop(0,'#fff'); grad.addColorStop(0.5,'#ffd66b'); grad.addColorStop(1,'#ff8c00');
+  ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
+}
 
 // Physics
 function simulate(dt){
   if(!ball) return;
-  const g=600; ball.vy+=g*dt; ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
+  const g=900; ball.vy+=g*dt; ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
   // walls
-  if(ball.x<8){ ball.x=8; ball.vx=Math.abs(ball.vx)*0.5; ball.vy*=0.9; }
-  if(ball.x>width-8){ ball.x=width-8; ball.vx=-Math.abs(ball.vx)*0.5; ball.vy*=0.9; }
+  if(ball.x<ball.r){ ball.x=ball.r; ball.vx=Math.abs(ball.vx)*0.5; ball.vy*=0.9; }
+  if(ball.x>width-ball.r){ ball.x=width-ball.r; ball.vx=-Math.abs(ball.vx)*0.5; ball.vy*=0.9; }
   // pegs
   for(const p of pegs){
     const dx=ball.x-p.x, dy=ball.y-p.y, dist=Math.sqrt(dx*dx+dy*dy), minD=ball.r+p.r;
-    if(dist<minD && dist>0){ const nx=dx/dist, ny=dy/dist, rel=ball.vx*nx+ball.vy*ny; ball.vx-=(1.8*rel)*nx; ball.vy-=(1.8*rel)*ny; const overlap=minD-dist; ball.x+=nx*overlap; ball.y+=ny*overlap; } 
+    if(dist<minD && dist>0){ const nx=dx/dist, ny=dy/dist, rel=ball.vx*nx+ball.vy*ny; ball.vx-=(1.8*rel)*nx; ball.vy-=(1.8*rel)*ny; const overlap=minD-dist; ball.x+=nx*overlap; ball.y+=ny*overlap; }
   }
   // landing
-  if(ball.y>=height-40){
+  if(ball.y>=height-60){
     const idx=Math.min(slotCount-1,Math.floor(ball.x/(width/slotCount)));
     const pts=baseScores[idx];
     total+=pts;
@@ -113,29 +131,31 @@ function simulate(dt){
 
 // Draw static
 function drawStatic(){
-  ctx.fillStyle="#0c1223"; ctx.fillRect(0,0,width,height);
-  ctx.fillStyle="#fff"; for(const p of pegs){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
-  const slotH=36;
+  // gradient background
+  const grad=ctx.createLinearGradient(0,0,0,height);
+  grad.addColorStop(0,'#071021'); grad.addColorStop(1,'#0c1223');
+  ctx.fillStyle=grad; ctx.fillRect(0,0,width,height);
+  // pegs
+  for(const p of pegs){ ctx.beginPath(); ctx.fillStyle='#9df'; ctx.shadowColor='#0ff'; ctx.shadowBlur=5; ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
+  ctx.shadowBlur=0;
+  // slots
+  const slotH=50;
   for(let i=0;i<slotCount;i++){
     ctx.fillStyle="#111"; ctx.fillRect(i*width/slotCount,height-slotH,width/slotCount,slotH);
-    ctx.fillStyle="#ffd66b"; ctx.font="bold 14px monospace"; ctx.textAlign="center"; ctx.fillText(baseScores[i],i*width/slotCount+width/slotCount/2,height-12);
+    ctx.fillStyle="#ffd66b"; ctx.font="bold 16px monospace"; ctx.textAlign="center"; ctx.fillText(baseScores[i],i*width/slotCount+width/slotCount/2,height-20);
   }
 }
 drawStatic();
 
 // Render
-function render(){
-  drawStatic();
-  drawBall();
-  if(dropping) requestAnimationFrame(render);
-}
+function render(){ drawStatic(); drawBall(); if(dropping) requestAnimationFrame(render); }
 
 // Drop
 document.getElementById('drop').addEventListener('click',()=>{
   if(dropping) return;
-  ball={x:width/2,y:20,vx:(Math.random()-0.5)*40,vy:0,r:8};
+  ball={x:width/2,y:30,vx:(Math.random()-0.5)*50,vy:0,r:10};
   dropping=true;
-  requestAnimationFrame(function step(t){ simulate(1/60); render(); if(dropping) requestAnimationFrame(step); });
+  requestAnimationFrame(function step(){ simulate(1/60); render(); if(dropping) requestAnimationFrame(step); });
 });
 
 // Reset
