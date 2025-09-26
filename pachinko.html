@@ -5,227 +5,202 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pachinko Simulator</title>
 <style>
-  body {
-    margin: 0;
-    background: #071021;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    font-family: monospace;
-    color: #fff;
-    overflow: hidden;
-  }
-  #container {
-    text-align: center;
-  }
-  canvas {
-    border-radius: 12px;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.7);
-    background: linear-gradient(to bottom, #071021, #0c1223);
-  }
-  button {
-    margin: 8px 4px;
-    padding: 10px 16px;
-    font-weight: 800;
-    border-radius: 8px;
-    cursor: pointer;
-  }
+  body { margin:0; background:#071021; display:flex; justify-content:center; align-items:center; height:100vh; color:#fff; font-family:monospace; }
+  #container { text-align:center; }
+  canvas { border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.7); display:block; margin:auto; background:#0c1223; }
+  button { padding:10px 16px; border-radius:8px; font-weight:700; margin:8px 4px; cursor:pointer; border:none; }
   #drop { background:#0f766e; color:#fff; }
   #reset { background:#2b2b2b; color:#fff; }
+  #total { font-size:30px; margin:10px 0; color:#ffd66b; }
+  #last { color:#9aa6b2; font-size:14px; margin-top:6px; }
 </style>
 </head>
 <body>
 <div id="container">
-  <h2>Total Points (Dynamic Cap)</h2>
-  <div id="total" style="font-size:28px; margin-bottom:12px;">0</div>
-  <canvas id="pachinko" width="360" height="540"></canvas>
-  <div style="margin-top:12px;">
+  <div>Total Points (Max 200)</div>
+  <div id="total">0</div>
+  <canvas id="pachinko" width="800" height="900"></canvas>
+  <div>
     <button id="drop">DROP</button>
-    <button id="reset">RESET</button>
+    <button id="reset">RESET POINTS</button>
   </div>
-  <div id="last" style="color:#9aa6b2; margin-top:10px; font-size:14px;">Last: —</div>
-  <div id="timer" style="margin-top:8px; font-size:13px; color:#ffd66b;"></div>
+  <div id="last">Last: —</div>
 </div>
 
 <script>
 const canvas = document.getElementById('pachinko');
 const ctx = canvas.getContext('2d');
 const width = canvas.width, height = canvas.height;
+const rows = 12, slotCount = rows+1;
+const STORAGE_KEY = 'pachinko.session.v2';
+const POINT_CAP = 200;
 
-// POINT SYSTEM
-let totalPoints = 0;
-let capMultiplier = 1; // 500, 1000, 1500, ...
-let lastDrop = null;
-const STORAGE_KEY = 'pachinkoPointsV2';
-const BASE_CAP = 500;
-const RESET_INTERVAL = 60*60*1000; // 1 hour for demo
+let displayTotal = 0, history = [], ball = null, dropping = false;
 
-// LOAD SAVED DATA
-let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-totalPoints = saved.totalPoints || 0;
-capMultiplier = saved.capMultiplier || 1;
-lastDrop = saved.lastDrop || Date.now();
-
-document.getElementById('total').innerText = totalPoints;
-
-// TIMER
-function updateTimer(){
-  let remaining = Math.max(0, RESET_INTERVAL - (Date.now() - lastDrop));
-  let mins = Math.floor(remaining/60000);
-  let secs = Math.floor((remaining%60000)/1000);
-  document.getElementById('timer').innerText = `Reset in ${mins}:${secs.toString().padStart(2,'0')}`;
-  if(remaining <= 0){
-    totalPoints = 0;
-    capMultiplier++;
-    lastDrop = Date.now();
-    saveData();
-    document.getElementById('total').innerText = totalPoints;
+// Load saved data
+try{
+  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+  if(stored){
+    displayTotal = stored.total || 0;
+    history = stored.history || [];
   }
-}
-setInterval(updateTimer, 1000);
-updateTimer();
+}catch{}
 
-function saveData(){
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({totalPoints, capMultiplier, lastDrop}));
-}
+document.getElementById('total').innerText = displayTotal;
+if(history.length) document.getElementById('last').innerText = `Last: ${history[0].points}pts (slot ${history[0].slot})`;
 
-// PEGS
-const rows = 8, cols = 6;
-let pegs = [];
-const margin = 20, topY = 50, bottomY = height - 100;
-const rowSpacing = (bottomY-topY)/rows;
-const colSpacing = (width-margin*2)/cols;
+// Base scores
+const baseScores = Array.from({ length: slotCount }, (_, i) => Math.max(1, 50 - Math.abs(i - (slotCount-1)/2)*8));
 
-for(let r=0;r<rows;r++){
-  for(let c=0;c<cols;c++){
-    let offset = (r%2)*(colSpacing/2);
-    pegs.push({x: margin + c*colSpacing + offset + colSpacing/2, y: topY + r*rowSpacing, r:6});
+// Peg setup
+const pegs = [];
+const margin=24, topY=60, bottomY=height-140;
+const pegCols=10, pegRows=rows;
+const rowSpacing=(bottomY-topY)/pegRows;
+const colSpacing=(width-margin*2)/pegCols;
+for(let r=0;r<pegRows;r++){
+  for(let c=0;c<pegCols;c++){
+    const offset=(r%2)*(colSpacing/2);
+    const x=margin+c*colSpacing+offset+colSpacing/2;
+    const y=topY+r*rowSpacing;
+    pegs.push({x,y,r:7});
   }
 }
 
-// SLOTS
-const slotCount = rows + 1;
-const baseScores = Array.from({length: slotCount}, (_,i)=>Math.max(5, 50 - Math.abs(i-(slotCount-1)/2)*6));
-
-// BALL
-let ball = null;
-let dropping = false;
+// Pre-render static
+const staticCanvas=document.createElement('canvas');
+staticCanvas.width=width; staticCanvas.height=height;
+const staticCtx=staticCanvas.getContext('2d');
 
 function drawStatic(){
-  ctx.clearRect(0,0,width,height);
+  const grad=staticCtx.createLinearGradient(0,0,0,height);
+  grad.addColorStop(0,'#071021'); grad.addColorStop(1,'#0c1223');
+  staticCtx.fillStyle=grad; staticCtx.fillRect(0,0,width,height);
+
   // pegs
   for(const p of pegs){
-    ctx.beginPath();
-    ctx.fillStyle='#e6e6ff';
-    ctx.shadowColor='#7fffd4';
-    ctx.shadowBlur=6;
-    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-    ctx.fill();
+    staticCtx.beginPath();
+    staticCtx.fillStyle='#e6e6ff';
+    staticCtx.shadowColor='#7fffd4';
+    staticCtx.shadowBlur=8;
+    staticCtx.arc(p.x,p.y,p.r,0,Math.PI*2); staticCtx.fill();
   }
-  ctx.shadowBlur=0;
+  staticCtx.shadowBlur=0;
+
   // slots
-  const slotTop = height-80, slotH=70;
-  ctx.fillStyle="#111";
-  ctx.fillRect(0,slotTop,width,slotH);
-  ctx.strokeStyle="#2b2b2b";
+  const slotTop=height-120, slotH=96, slotW=width/slotCount;
+  staticCtx.fillStyle="#111"; staticCtx.fillRect(0,slotTop,width,slotH);
+  staticCtx.strokeStyle="#2b2b2b";
   for(let i=0;i<slotCount;i++){
-    ctx.strokeRect(i*width/slotCount+4, slotTop+4, width/slotCount-8, slotH-8);
-    ctx.fillStyle="#ffd66b";
-    ctx.font="bold 16px monospace";
-    ctx.textAlign="center";
-    ctx.fillText(baseScores[i], i*width/slotCount+width/slotCount/2, slotTop+40);
+    staticCtx.strokeRect(i*slotW+6,slotTop+6,slotW-12,slotH-12);
+    staticCtx.fillStyle="#cfcfcf"; staticCtx.font="bold 14px monospace"; staticCtx.textAlign="center";
+    staticCtx.fillText(i,i*slotW+slotW/2,slotTop+28);
+    staticCtx.fillStyle="#ffd66b"; staticCtx.font="bold 18px monospace";
+    staticCtx.fillText(baseScores[i],i*slotW+slotW/2,slotTop+58);
   }
 }
 drawStatic();
 
-function drawBall(){
-  if(!ball) return;
-  let grad = ctx.createRadialGradient(ball.x,ball.y,2,ball.x,ball.y,ball.r);
-  grad.addColorStop(0,'#fff2b2');
-  grad.addColorStop(0.5,'#ffb347');
-  grad.addColorStop(1,'#ff8c00');
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
-  ctx.fill();
-}
+// Audio
+let audioCtx=null;
+function ensureAudio(){ if(!audioCtx) try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch{} return audioCtx; }
+function plink(f=900,d=0.04){ const ctx=ensureAudio(); if(!ctx)return; const o=ctx.createOscillator(),g=ctx.createGain(); o.type='sine'; o.frequency.value=f*(0.9+Math.random()*0.2); g.gain.value=0.06; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d); o.stop(ctx.currentTime+d+0.01); }
+function plonk(f=220,d=0.18){ const ctx=ensureAudio(); if(!ctx)return; const o=ctx.createOscillator(),g=ctx.createGain(); o.type='triangle'; o.frequency.value=f*(0.95+Math.random()*0.08); g.gain.value=0.12; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d); o.stop(ctx.currentTime+d+0.01); }
 
-// PHYSICS
+// Ball draw
+function drawBall(){ if(!ball) return; const grad=ctx.createRadialGradient(ball.x,ball.y,2,ball.x,ball.y,ball.r); grad.addColorStop(0,'#fff2b2'); grad.addColorStop(0.5,'#ffb347'); grad.addColorStop(1,'#ff8c00'); ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill(); }
+
+// Physics
 function simulatePhysics(dt){
   if(!ball) return;
-  const g=600;
-  ball.vy+=g*dt;
-  ball.vx*=0.995; ball.vy*=0.995;
-  ball.x+=ball.vx*dt*60; ball.y+=ball.vy*dt*60;
+  const g=400;
+  ball.vy += g*dt;
+  ball.vx *= 0.995; ball.vy *= 0.995;
+  ball.x += ball.vx*dt*30;
+  ball.y += ball.vy*dt*30;
 
-  // wall collisions
-  if(ball.x-ball.r<0){ ball.x=ball.r; ball.vx=Math.abs(ball.vx)*0.6; }
-  if(ball.x+ball.r>width){ ball.x=width-ball.r; ball.vx=-Math.abs(ball.vx)*0.6; }
+  if(ball.x-ball.r < 0){ ball.x=ball.r; ball.vx=Math.abs(ball.vx)*0.6; }
+  if(ball.x+ball.r > width){ ball.x=width-ball.r; ball.vx=-Math.abs(ball.vx)*0.6; }
 
-  // peg collisions (simplified)
   for(const p of pegs){
     const dx=ball.x-p.x, dy=ball.y-p.y;
-    const dist=Math.sqrt(dx*dx+dy*dy);
-    const minD = ball.r+p.r;
+    const dist=Math.sqrt(dx*dx + dy*dy), minD=ball.r+p.r;
     if(dist<minD && dist>0){
       const nx=dx/dist, ny=dy/dist, rel=ball.vx*nx+ball.vy*ny;
-      ball.vx-=(1.5*rel)*nx;
-      ball.vy-=(1.5*rel)*ny;
-      ball.vx+=(Math.random()-0.5)*5;
-      ball.y-=0.5; // prevent sticking
+      ball.vx -= 1.2*rel*nx; ball.vy -= 1.2*rel*ny;
+      ball.vx += (Math.random()-0.5)*2;
+      ball.y -= 0.3;
+      plink(700-(p.y/height)*300,0.03);
     }
   }
 
-  // bottom slots
   if(ball.y+ball.r >= height-80){
-    const idx = Math.floor(ball.x/(width/slotCount));
+    const idx=Math.floor(ball.x/(width/slotCount));
     ball.x = idx*width/slotCount + width/slotCount/2;
     ball.y = height-80-ball.r;
-    ball.vx=0; ball.vy=0;
-    dropping=false;
+    ball.vx=0; ball.vy=0; dropping=false;
     addPoints(idx);
   }
 }
 
+// Add points
 function addPoints(idx){
-  const pts = baseScores[idx];
-  totalPoints = Math.min(BASE_CAP*capMultiplier, totalPoints + pts);
-  document.getElementById('total').innerText = totalPoints;
-  document.getElementById('last').innerText = `Last: ${pts} pts (slot ${idx})`;
-  if(totalPoints >= BASE_CAP*capMultiplier) document.getElementById('drop').disabled=true;
-  lastDrop = Date.now();
-  saveData();
+  const pts = baseScores[idx]||0;
+  const start=displayTotal, end=Math.min(POINT_CAP,start+pts);
+  const dur=800, t0=performance.now();
+  function tick(now){
+    const p=Math.min(1,(now-t0)/dur);
+    displayTotal=Math.floor(start + (end-start)*(1-Math.pow(1-p,2)));
+    document.getElementById('total').innerText=displayTotal;
+    if(p<1) requestAnimationFrame(tick);
+    else{
+      history.unshift({slot:idx, points:pts, ts:new Date().toISOString()});
+      history=history.slice(0,200);
+      document.getElementById('last').innerText=`Last: ${pts}pts (slot ${idx})`;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({total:displayTotal,history}));
+      if(displayTotal>=POINT_CAP) document.getElementById('drop').disabled=true;
+    }
+  }
+  requestAnimationFrame(tick);
 }
 
+// Render loop
 function render(){
-  drawStatic();
+  ctx.drawImage(staticCanvas,0,0);
   drawBall();
   if(dropping) requestAnimationFrame(render);
 }
 
-// DROP
-document.getElementById('drop').addEventListener('click', ()=>{
-  if(dropping || totalPoints >= BASE_CAP*capMultiplier) return;
-  ball={x:width/2, y:10, vx:(Math.random()-0.5)*4, vy:0, r:8};
+// Drop button
+document.getElementById('drop').addEventListener('click',()=>{
+  if(dropping || displayTotal>=POINT_CAP) return;
+  ball={x:width/2,y:28,vx:(Math.random()-0.5)*6,vy:0,r:10};
   dropping=true;
-  requestAnimationFrame(function step(){
-    simulatePhysics(1/60);
+  ensureAudio();
+  requestAnimationFrame(function step(now){
+    const dt=Math.min(32,now-(ball.last||now))/1000; ball.last=now;
+    simulatePhysics(dt);
     render();
     if(dropping) requestAnimationFrame(step);
   });
 });
 
-// RESET
-document.getElementById('reset').addEventListener('click', ()=>{
-  totalPoints=0; ball=null; dropping=false;
-  capMultiplier=1; lastDrop=Date.now();
-  document.getElementById('total').innerText=totalPoints;
+// Reset button
+document.getElementById('reset').addEventListener('click',()=>{
+  displayTotal=0; history=[]; ball=null; dropping=false;
+  document.getElementById('total').innerText=displayTotal;
   document.getElementById('last').innerText='Last: —';
   document.getElementById('drop').disabled=false;
-  saveData();
-  drawStatic();
+  localStorage.removeItem(STORAGE_KEY);
+  drawStatic(); ctx.drawImage(staticCanvas,0,0);
 });
+
+// Initial render
+ctx.drawImage(staticCanvas,0,0);
+if(history.length && history[0].slot!=null){
+  ball={x:history[0].slot*(width/slotCount)+width/slotCount/2,y:height-80-ball.r,r:10};
+  drawBall();
+}
 </script>
 </body>
 </html>
