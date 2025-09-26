@@ -3,87 +3,125 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Slots</title>
+<title>Slots Simulator</title>
 <style>
-  body { background:#000; color:#fff; font-family:monospace; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; }
-  h1 { color:#ffd66b; text-shadow:0 0 10px #ffd66b55; }
-  button { margin:12px; padding:8px 16px; font-weight:800; border-radius:8px; cursor:pointer; background:#ff4d4d; border:none; color:#fff; }
-  button:disabled { background:#555; cursor:not-allowed; }
-  #reel { font-size:50px; margin:20px; }
-  #total { margin-top:10px; font-size:24px; color:#0ff; }
-  #timer { font-size:14px; color:#ffd66b; margin-top:6px; }
+  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap');
+
+  body {
+    margin:0;
+    font-family:'Montserrat',sans-serif;
+    background: linear-gradient(135deg, #071021 0%, #0c1223 100%);
+    color:#fff;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
+    padding:20px;
+  }
+
+  h1 { color:#ffd66b; text-shadow:0 0 15px #ffd66b55; margin-bottom:20px; }
+  .reels { display:flex; justify-content:center; gap:10px; margin-bottom:20px; }
+  .reel { background:#111; border:2px solid #2b2b2b; border-radius:12px; width:80px; height:80px; display:flex; justify-content:center; align-items:center; font-size:2.2rem; }
+  button { padding:12px 24px; font-weight:700; border:none; border-radius:10px; cursor:pointer; background:#ff4d4d; color:#fff; transition:0.3s; }
+  button:hover { background:#e63946; }
+  #total { margin-top:15px; font-size:1.5rem; color:#ffd66b; }
+  #timer { margin-top:5px; color:#9aa6b2; font-size:0.9rem; }
 </style>
 </head>
 <body>
 
-<h1>🎰 Slots</h1>
-<div id="reel">🍒 🍋 🍊</div>
-<button id="spin">SPIN (25 points)</button>
+<h1>🎰 Slot Machine</h1>
+<div class="reels">
+  <div class="reel" id="reel0">❓</div>
+  <div class="reel" id="reel1">❓</div>
+  <div class="reel" id="reel2">❓</div>
+</div>
+<button id="spin">SPIN</button>
 <div id="total">Total Points: 0</div>
-<div id="timer"></div>
+<div id="timer">Next reset in: 01:00:00</div>
 
 <script>
-const SPIN_COST = 25;
-const REWARDS = ["🍒","🍋","🍊","🍇","⭐"];
-const STORAGE_KEY = 'slotsTotal';
-let totalPoints = parseInt(localStorage.getItem(STORAGE_KEY)) || 0;
-let cap = parseInt(localStorage.getItem('slotsCap')) || 500;
-let capReset = parseInt(localStorage.getItem('slotsReset')) || 0;
+const STORAGE_KEY='slots.session.v1';
+const CAP_INTERVAL=60*60*1000; // 1 hour
+const BASE_CAP=500;
+const SYMBOLS=['🍒','🍋','🍉','⭐','🔔','💎','7️⃣'];
+let total=0, capMultiplier=1, lastReset=Date.now(), spinning=false;
 
-const reelEl = document.getElementById('reel');
-const totalEl = document.getElementById('total');
-const timerEl = document.getElementById('timer');
-const spinBtn = document.getElementById('spin');
+// Load localStorage
+try{
+  const saved=JSON.parse(localStorage.getItem(STORAGE_KEY));
+  if(saved){
+    const elapsed=Date.now()-saved.lastReset;
+    total=saved.total||0;
+    capMultiplier=saved.capMultiplier||1;
+    lastReset=saved.lastReset||Date.now();
+    if(elapsed>=CAP_INTERVAL){
+      total=0;
+      capMultiplier=1;
+      lastReset=Date.now();
+    }
+  }
+}catch{}
 
-function updateUI(){
-  totalEl.textContent = `Total Points: ${totalPoints}`;
-  const remaining = Math.max(0, capReset - Date.now());
-  if(remaining>0){
-    const mins = Math.floor(remaining/60000);
-    const secs = Math.floor((remaining%60000)/1000);
-    timerEl.textContent = `Next cap in ${mins}m ${secs}s`;
-    spinBtn.disabled=true;
-  } else {
-    timerEl.textContent = '';
-    spinBtn.disabled=false;
+document.getElementById('total').innerText=`Total Points: ${total}`;
+
+// Timer
+function updateTimer(){
+  const remaining=Math.max(0,CAP_INTERVAL-(Date.now()-lastReset));
+  const hrs=Math.floor(remaining/3600000);
+  const mins=Math.floor((remaining%3600000)/60000);
+  const secs=Math.floor((remaining%60000)/1000);
+  document.getElementById('timer').innerText=`Next reset in: ${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+  if(remaining<=0){
+    total=0;
+    capMultiplier=1;
+    lastReset=Date.now();
+    localStorage.removeItem(STORAGE_KEY);
+    document.getElementById('total').innerText=`Total Points: ${total}`;
   }
 }
-updateUI();
-setInterval(updateUI, 1000);
+setInterval(updateTimer,1000);
+updateTimer();
 
-// spin function
-spinBtn.addEventListener('click', ()=>{
-  if(totalPoints<SPIN_COST) return alert("Not enough points!");
-  totalPoints -= SPIN_COST;
+// Spin logic
+document.getElementById('spin').addEventListener('click',()=>{
+  if(spinning) return;
+  spinning=true;
+  const reels=[...document.querySelectorAll('.reel')];
+  const chosenSymbol=SYMBOLS[Math.floor(Math.random()*SYMBOLS.length)];
 
-  // slow reel animation
-  let spins = 20;
-  const interval = setInterval(()=>{
-    reelEl.textContent = REWARDS.map(r=>REWARDS[Math.floor(Math.random()*REWARDS.length)]).join(" ");
-    spins--;
-    if(spins<=0){
+  // Slow biased spin
+  const spins=40;
+  let count=0;
+  const interval=setInterval(()=>{
+    reels.forEach(r=>{
+      if(Math.random()<0.35) r.innerText=chosenSymbol; 
+      else r.innerText=SYMBOLS[Math.floor(Math.random()*SYMBOLS.length)];
+    });
+    count++;
+    if(count>=spins){
       clearInterval(interval);
-      // determine reward
-      let chosen = Math.random();
-      let reward = 0;
-      if(chosen < 0.05) reward = 150;       // big jackpot rare
-      else if(chosen < 0.25) reward = 50;
-      else if(chosen < 0.6) reward = 20;
-      else reward = 5;
-      totalPoints += reward;
-
-      if(totalPoints>=cap){
-        capReset = Date.now() + 60*60*1000; // 1 hour
-        totalPoints = cap;
-        localStorage.setItem('slotsCap', cap+500);
-        localStorage.setItem('slotsReset', capReset);
+      const result=reels.map(r=>r.innerText);
+      // Count matches
+      let reward=0;
+      const first=result[0];
+      if(result.every(s=>s===first)) reward=50*capMultiplier; // full match
+      else if(result[0]===result[1]||result[1]===result[2]||result[0]===result[2]) reward=20*capMultiplier; // partial
+      total+=reward;
+      const currentCap=BASE_CAP*capMultiplier;
+      if(total>=currentCap){
+        lastReset=Date.now();
+        capMultiplier++;
       }
-      localStorage.setItem(STORAGE_KEY, totalPoints);
-      updateUI();
+      if(total>BASE_CAP*capMultiplier) total=BASE_CAP*capMultiplier;
+      document.getElementById('total').innerText=`Total Points: ${total}`;
+      // Save
+      localStorage.setItem(STORAGE_KEY,JSON.stringify({total,capMultiplier,lastReset}));
+      spinning=false;
     }
-  }, 100);
+  },100);
 });
 </script>
-
 </body>
 </html>
