@@ -3,70 +3,83 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gamblecore Pachinko</title>
+<title>Roulette</title>
 <style>
-  body { margin:0; background:#071021; color:#fff; font-family:'Montserrat',sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; }
-  h1 { color:#ffd66b; text-shadow:0 0 10px #ffd66b88; margin-bottom:15px; }
-  button { padding:8px 14px; margin:5px; border-radius:8px; font-weight:700; background:#ff4d4d; color:#fff; border:none; cursor:pointer; }
+  body { background:#000; color:#fff; font-family:monospace; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; }
+  h1 { color:#ffd66b; text-shadow:0 0 10px #ffd66b55; }
+  button { margin:8px; padding:8px 16px; font-weight:800; border-radius:8px; cursor:pointer; background:#ff4d4d; border:none; color:#fff; }
   button:disabled { background:#555; cursor:not-allowed; }
-  #total, #last { margin:10px 0; font-size:1.2rem; color:#cfcfcf; }
+  #total { margin-top:10px; font-size:24px; color:#0ff; }
+  #timer { font-size:14px; color:#ffd66b; margin-top:6px; }
 </style>
 </head>
 <body>
 
-<h1>Pachinko</h1>
-<button id="drop">DROP BALL</button>
-<button id="reset">RESET</button>
+<h1>🃏 Roulette</h1>
+<div>
+  <button id="red">Red</button>
+  <button id="black">Black</button>
+</div>
 <div id="total">Total Points: 0</div>
-<div id="last">Last: —</div>
+<div id="timer"></div>
 
 <script>
-const POINT_CAPS=[500,1000,1500];
-const REWARD_SMALL=5;
-const REWARD_MEDIUM=15;
-const REWARD_BIG=40;
-let totalPoints=parseInt(localStorage.getItem('pachinkoTotal'))||0;
-let currentCapIndex=parseInt(localStorage.getItem('pachinkoCapIndex'))||0;
-let lastResult='';
+const BET_COST = 25;
+const STORAGE_KEY = 'rouletteTotal';
+let totalPoints = parseInt(localStorage.getItem(STORAGE_KEY)) || 0;
+let cap = parseInt(localStorage.getItem('rouletteCap')) || 500;
+let capReset = parseInt(localStorage.getItem('rouletteReset')) || 0;
 
-function getCurrentCap(){ return POINT_CAPS[currentCapIndex]||POINT_CAPS[POINT_CAPS.length-1]; }
-function saveState(){ localStorage.setItem('pachinkoTotal',totalPoints); localStorage.setItem('pachinkoCapIndex',currentCapIndex); }
+const totalEl = document.getElementById('total');
+const timerEl = document.getElementById('timer');
+const buttons = {red:document.getElementById('red'), black:document.getElementById('black')};
+
 function updateUI(){
-  document.getElementById('total').innerText=`Total Points: ${totalPoints}`;
-  document.getElementById('last').innerText=`Last: ${lastResult}`;
-  document.querySelectorAll('button').forEach(b=>b.disabled=totalPoints>=getCurrentCap());
-}
-
-document.getElementById('drop').addEventListener('click',()=>{
-  if(totalPoints>=getCurrentCap()) return;
-  const slots=[0,1,2,3,4,5,6,7,8,9,10];
-  const slot=slots[Math.floor(Math.random()*slots.length)];
-  let pts=REWARD_SMALL;
-  if(slot===5) pts=REWARD_BIG;
-  else if(slot%2===0) pts=REWARD_MEDIUM;
-  addPoints(pts,`${pts}pts (slot ${slot})`);
-});
-
-document.getElementById('reset').addEventListener('click',()=>{
-  totalPoints=0; currentCapIndex=0; lastResult='—'; saveState(); updateUI();
-});
-
-function addPoints(pts,text){
-  totalPoints=Math.min(getCurrentCap(),totalPoints+pts);
-  lastResult=text;
-  saveState();
-  if(totalPoints>=getCurrentCap()){
-    setTimeout(()=>{
-      currentCapIndex=Math.min(currentCapIndex+1,POINT_CAPS.length-1);
-      totalPoints=0;
-      saveState();
-      updateUI();
-    },60*60*1000); // 1 hour
+  totalEl.textContent = `Total Points: ${totalPoints}`;
+  const remaining = Math.max(0, capReset - Date.now());
+  if(remaining>0){
+    const mins = Math.floor(remaining/60000);
+    const secs = Math.floor((remaining%60000)/1000);
+    timerEl.textContent = `Next cap in ${mins}m ${secs}s`;
+    buttons.red.disabled=true;
+    buttons.black.disabled=true;
+  } else {
+    timerEl.textContent = '';
+    buttons.red.disabled=false;
+    buttons.black.disabled=false;
   }
+}
+updateUI();
+setInterval(updateUI, 1000);
+
+function spinRoulette(color){
+  if(totalPoints<BET_COST) return alert("Not enough points!");
+  totalPoints -= BET_COST;
+
+  // bias slightly toward chosen color
+  const r = Math.random();
+  let outcome = 'red';
+  if(r<0.45) outcome='red';
+  else if(r<0.9) outcome='black';
+  else outcome = Math.random()<0.5?'red':'black';
+
+  let reward = (color===outcome)? Math.floor(Math.random()*50)+20 : Math.floor(Math.random()*15)+5;
+  totalPoints += reward;
+
+  if(totalPoints>=cap){
+    capReset = Date.now() + 60*60*1000;
+    totalPoints = cap;
+    localStorage.setItem('rouletteCap', cap+500);
+    localStorage.setItem('rouletteReset', capReset);
+  }
+
+  localStorage.setItem(STORAGE_KEY, totalPoints);
   updateUI();
+  alert(`Roulette: ${outcome}. You got ${reward} points!`);
 }
 
-updateUI();
+buttons.red.addEventListener('click', ()=>spinRoulette('red'));
+buttons.black.addEventListener('click', ()=>spinRoulette('black'));
 </script>
 
 </body>
